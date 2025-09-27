@@ -340,9 +340,14 @@ export default function ForYouScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Find Your Match</Text>
-      </View>
-
+       <Text style={styles.title}>Find Your Match</Text>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('MatchesScreen')}
+            style={{ position: 'absolute', right: 16, top: 60, paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderRadius: 10, backgroundColor: '#fff' }}
+          >
+          <Text style={{ fontWeight: '600' }}>Matches</Text>
+          </TouchableOpacity>
+        </View>
       {loading && <Text style={styles.loading}>Loading...</Text>}
 
       <View style={styles.cardStack}>
