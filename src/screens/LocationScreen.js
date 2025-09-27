@@ -7,7 +7,7 @@ import { useFonts, SourGummy_700Bold } from '@expo-google-fonts/sour-gummy';
 const { width, height } = Dimensions.get('window');
 const foodEmojis = ['🍕', '🍔', '🍟', '🌮', '🍝', '🍜', '🍱', '🍣', '🥘', '🍲', '🥗', '🍰', '🧁', '🍪', '🍩', '🥐', '🥨', '🌭', '🥪', '🍖'];
 
-const NEXT_ROUTE = 'ForYouScreen';
+const NEXT_ROUTE = 'MainTabs';
 
 const FoodEmojiBackground = () => {
   const [currentEmoji, setCurrentEmoji] = useState(foodEmojis[0]);
@@ -83,12 +83,56 @@ export default function LocationScreen({ route, navigation }) {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error('Not signed in');
 
-        await supabase.rpc('set_profile', {
-        p_name: displayName || user.email?.split('@')[0] || 'User',
-        p_zipcode: zipcodeNum,
-        p_likes: Array.isArray(likes) ? likes : [],
-        p_dislikes: []
-        });
+        console.log('Saving profile with zipcode:', zipcodeNum);
+        const userName = displayName || user.email?.split('@')[0] || 'User';
+        const userLikes = Array.isArray(likes) ? likes : [];
+
+        // Try RPC function first
+        try {
+            const { data: rpcData, error: rpcError } = await supabase.rpc('set_profile', {
+                p_name: userName,
+                p_zipcode: zipcodeNum,
+                p_likes: userLikes,
+                p_dislikes: []
+            });
+
+            if (rpcError) throw rpcError;
+            console.log('RPC set_profile succeeded:', rpcData);
+        } catch (rpcError) {
+            console.log('RPC set_profile failed, using fallback:', rpcError.message);
+
+            // Fallback: Direct database operations
+            const { error: publicError } = await supabase
+                .from('users_public')
+                .upsert({
+                    user_id: user.id,
+                    name: userName,
+                    zipcode: zipcodeNum
+                });
+
+            if (publicError) {
+                console.error('users_public upsert error:', publicError);
+                throw publicError;
+            }
+
+            // Save preferences if we have them
+            if (userLikes.length > 0) {
+                const { error: profileError } = await supabase
+                    .from('profiles')
+                    .upsert({
+                        user_id: user.id,
+                        likes: userLikes,
+                        dislikes: []
+                    });
+
+                if (profileError) {
+                    console.warn('Profile likes save failed:', profileError);
+                    // Don't throw here, zipcode save is more critical
+                }
+            }
+
+            console.log('Fallback profile save completed successfully');
+        }
 
         let ok = false, last;
         for (let i = 0; i < 3; i++) {
@@ -98,14 +142,22 @@ export default function LocationScreen({ route, navigation }) {
             .eq('user_id', user.id)
             .maybeSingle();
         last = data;
-        if (error) break;
+        console.log(`Verification attempt ${i + 1}:`, { data, error });
+        if (error) {
+            console.error('Error reading users_public:', error);
+            break;
+        }
         const zc = typeof data?.zipcode === 'string' ? parseInt(data.zipcode) : data?.zipcode;
+        console.log(`Zipcode verification - raw: ${data?.zipcode}, parsed: ${zc}, isInteger: ${Number.isInteger(zc)}`);
         if (Number.isInteger(zc)) { ok = true; break; }
         await new Promise(r => setTimeout(r, 250));
         }
-        if (!ok) console.warn('users_public not ready yet:', last);
+        if (!ok) {
+            console.warn('users_public not ready yet:', last);
+            console.warn('Final verification failed - proceeding anyway');
+        }
 
-        navigation.replace('ForYouScreen', { fromLocation: true });
+        navigation.replace('MainTabs', { fromLocation: true });
     } catch (e) {
         Alert.alert('Save error', e.message || String(e));
     }
@@ -152,8 +204,9 @@ export default function LocationScreen({ route, navigation }) {
             </TouchableOpacity>
           </View>
         </View>
+        </View>
       </View>
-    </View>
+    </TouchableWithoutFeedback>
   );
 }
 

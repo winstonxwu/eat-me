@@ -42,14 +42,34 @@ export default function PreferencesScreen({ navigation }) {
     setSelectedPreferences((prev) => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
   };
 
-  const continueToLocation = async () => {
-    if (selectedPreferences.length === 0) { Alert.alert('Select at least one'); return; }
-    if (!user) { Alert.alert('Not signed in'); return; }
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    navigation.replace('LocationScreen', {
-      likes: selectedPreferences,
-      name: user.email?.split('@')[0] || 'User',
-    });
+  const continueToProfile = async () => {
+    console.log('continueToProfile called');
+    if (selectedPreferences.length === 0) {
+      Alert.alert('Select at least one');
+      return;
+    }
+    if (!user) {
+      Alert.alert('Not signed in');
+      return;
+    }
+    console.log('Navigating to ProfileDetails with likes:', selectedPreferences);
+
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch (error) {
+      console.log('Haptics error:', error);
+    }
+
+    console.log('About to navigate to ProfileDetails');
+    try {
+      navigation.replace('ProfileDetails', {
+        likes: selectedPreferences,
+      });
+      console.log('Navigation call completed successfully');
+    } catch (navError) {
+      console.log('Navigation error:', navError);
+      Alert.alert('Navigation Error', navError.message);
+    }
   };
 
   const renderCategory = (c) => {
@@ -74,8 +94,8 @@ export default function PreferencesScreen({ navigation }) {
           <View style={styles.categoriesContainer}>{FOOD_CATEGORIES.map(renderCategory)}</View>
           <View style={styles.footer}>
             <Text style={styles.selectedCount}>{selectedPreferences.length} selected</Text>
-            <TouchableOpacity style={[styles.continueButton, (selectedPreferences.length===0 || loading) && styles.disabledButton]} onPress={continueToLocation} disabled={selectedPreferences.length===0 || loading}>
-              <Text style={styles.continueText}>{loading ? 'Saving...' : 'Continue'}</Text>
+            <TouchableOpacity style={[styles.continueButton, selectedPreferences.length===0 && styles.disabledButton]} onPress={continueToProfile} disabled={selectedPreferences.length===0}>
+              <Text style={styles.continueText}>Continue</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -100,7 +120,9 @@ const styles = StyleSheet.create({
   selectedText: { color: 'white', fontWeight: 'bold' },
   footer: { alignItems: 'center', marginTop: 20 },
   selectedCount: { color: 'rgba(255,255,255,0.8)', fontSize: 16, marginBottom: 20 },
-  continueButton: { backgroundColor: 'white', borderRadius: 25, paddingVertical: 15, paddingHorizontal: 40, minWidth: 200, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 },
+  continueButton: { backgroundColor: 'white', borderRadius: 25, paddingVertical: 15, paddingHorizontal: 40, minWidth: 200, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5, marginBottom: 15 },
+  skipButton: { backgroundColor: 'transparent', borderWidth: 2, borderColor: 'white', borderRadius: 25, paddingVertical: 15, paddingHorizontal: 40, minWidth: 200, alignItems: 'center' },
   disabledButton: { opacity: 0.5 },
   continueText: { color: '#667eea', fontSize: 18, fontWeight: 'bold' },
+  skipText: { color: 'white', fontSize: 16, fontWeight: '600' },
 });

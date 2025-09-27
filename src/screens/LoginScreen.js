@@ -13,6 +13,8 @@ import {
 } from 'react-native';
 import { useFonts, MsMadi_400Regular } from '@expo-google-fonts/ms-madi';
 import { SourGummy_700Bold } from '@expo-google-fonts/sour-gummy';
+import { MontserratAlternates_400Regular } from '@expo-google-fonts/montserrat-alternates';
+import { Pacifico_400Regular } from '@expo-google-fonts/pacifico';
 import { supabase } from '../utils/supabase';
 import { Colors } from '../constants';
 
@@ -20,7 +22,7 @@ const { width, height } = Dimensions.get('window');
 
 const ROUTES = {
   preferences: 'Preferences',
-  fyp: 'ForYouScreen',
+  fyp: 'MainTabs',
 };
 
 const foodEmojis = ['🍕', '🍔', '🍟', '🌮', '🍝', '🍜', '🍱', '🍣', '🥘', '🍲', '🥗', '🍰', '🧁', '🍪', '🍩', '🥐', '🥨', '🌭', '🥪', '🍖'];
@@ -122,6 +124,8 @@ export default function LoginScreen({ navigation }) {
   let [fontsLoaded] = useFonts({
     MsMadi_400Regular,
     SourGummy_700Bold,
+    MontserratAlternates_400Regular,
+    Pacifico_400Regular,
   });
 
  useEffect(() => {
@@ -144,14 +148,38 @@ export default function LoginScreen({ navigation }) {
   const routeAfterAuth = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
-      navigation.replace('Preferences');
+      // Check if user has already completed profile setup
+      const { data: profile } = await supabase
+        .from('users_public')
+        .select('name, zipcode')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      const { data: preferences } = await supabase
+        .from('profiles')
+        .select('likes')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      // If user has both profile data and preferences, skip to MainTabs
+      const hasProfile = profile?.name && (
+        (typeof profile.zipcode === 'string' && parseInt(profile.zipcode.trim()) >= 10000) ||
+        (typeof profile.zipcode === 'number' && profile.zipcode >= 10000)
+      );
+      const hasPreferences = preferences?.likes && Array.isArray(preferences.likes) && preferences.likes.length > 0;
+
+      if (hasProfile && hasPreferences) {
+        navigation.replace('MainTabs');
+      } else {
+        navigation.replace('Preferences');
+      }
     }
   };
 
   const checkUser = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
-      navigation.replace('Preferences');
+      await routeAfterAuth();
     }
   };
 
@@ -206,8 +234,8 @@ export default function LoginScreen({ navigation }) {
       >
         <View style={styles.content}>
           <View style={styles.header}>
-            <Text style={[styles.title, fontsLoaded && { fontFamily: 'SourGummy_700Bold' }]}>eatme</Text>
-            <Text style={[styles.subtitle, fontsLoaded && { fontFamily: 'MsMadi_400Regular' }]}>
+            <Text style={[styles.title, fontsLoaded && { fontFamily: 'Pacifico_400Regular' }]}>eatme</Text>
+            <Text style={[styles.subtitle, fontsLoaded && { fontFamily: 'MontserratAlternates_400Regular' }]}>
               love at first bite
             </Text>
           </View>
@@ -289,7 +317,7 @@ const styles = StyleSheet.create({
     marginBottom: 60,
   },
   title: {
-    fontSize: 60,
+    fontSize: 70,
     fontWeight: '900',
     color: 'white',
     textAlign: 'center',
@@ -297,7 +325,7 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   subtitle: {
-    fontSize: 28,
+    fontSize: 18,
     fontWeight: 'bold',
     color: 'rgba(255,255,255,0.9)',
     textAlign: 'center',

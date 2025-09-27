@@ -62,6 +62,10 @@ export default function MatchesScreen({ navigation }) {
   };
 
 
+  const openChat = (matchId, partnerName, partnerId) => {
+    navigation.navigate('ChatScreen', { matchId, partnerName, partnerId });
+  };
+
   const renderItem = ({ item }) => (
     <View style={styles.card}>
       <View style={{ flex: 1 }}>
@@ -69,22 +73,27 @@ export default function MatchesScreen({ navigation }) {
         <Text style={styles.meta}>Match #{item.id}</Text>
         {item.zipcode && <Text style={styles.zipcode}>Zipcode: {item.zipcode}</Text>}
       </View>
-      <TouchableOpacity style={styles.btn} onPress={() => openSuggest(item.id, item.name)}>
-        <Text style={styles.btnText}>Restaurants Nearby</Text>
-      </TouchableOpacity>
+      <View style={styles.buttonGroup}>
+        <TouchableOpacity style={[styles.btn, styles.chatBtn]} onPress={() => openChat(item.id, item.name, item.partnerId)}>
+          <Text style={[styles.btnText, styles.chatBtnText]}>💬 Chat</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.btn} onPress={() => openSuggest(item.id, item.name)}>
+          <Text style={styles.btnText}>🍽️ Eat</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 
   return (
     <View style={styles.wrap}>
       <Text style={styles.title}>Matches</Text>
-      {loading && <Text style={{ marginTop: 8 }}>Loading...</Text>}
+      {loading && <Text style={{ marginTop: 8, color: 'white', textAlign: 'center' }}>Loading...</Text>}
       <FlatList
         style={{ marginTop: 12 }}
         data={rows}
         keyExtractor={(it) => String(it.id)}
         renderItem={renderItem}
-        ListEmptyComponent={!loading ? <Text style={{ marginTop: 12 }}>No matches yet</Text> : null}
+        ListEmptyComponent={!loading ? <Text style={{ marginTop: 12, color: 'white', textAlign: 'center' }}>No matches yet</Text> : null}
         onRefresh={load}
         refreshing={loading}
       />
@@ -93,17 +102,29 @@ export default function MatchesScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, padding: 16 },
-  title: { fontSize: 22, fontWeight: '700' },
+  wrap: { flex: 1, padding: 16, paddingTop: 60, backgroundColor: '#ffb6c1' },
+  title: { fontSize: 22, fontWeight: '700', color: 'white' },
   card: {
     flexDirection: 'row', alignItems: 'center',
-    borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 10
+    borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 10, backgroundColor: 'white'
   },
   name: { fontSize: 16, fontWeight: '700' },
   meta: { marginTop: 4, opacity: 0.6 },
   zipcode: { marginTop: 2, opacity: 0.7, fontSize: 14, color: '#666' },
+  buttonGroup: {
+    flexDirection: 'row',
+    gap: 8,
+    marginLeft: 12,
+  },
   btn: {
-    paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, marginLeft: 12
+    paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1
   },
   btnText: { fontWeight: '600' },
+  chatBtn: {
+    backgroundColor: '#ffb6c1',
+    borderColor: '#ffb6c1',
+  },
+  chatBtnText: {
+    color: 'white',
+  },
 });

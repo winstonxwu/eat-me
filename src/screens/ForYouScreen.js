@@ -1,15 +1,35 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { View, Text, Alert, TouchableOpacity, StyleSheet, Dimensions, Animated, PanResponder } from 'react-native';
+import { View, Text, Alert, TouchableOpacity, StyleSheet, Dimensions, Animated, PanResponder, Image } from 'react-native';
 import { likeUser } from '../lib/api';
 import { supabase } from '../utils/supabase';
 
 const { width, height } = Dimensions.get('window');
+
+const FOOD_CATEGORIES = [
+  { id: 'italian', name: 'Italian', emoji: '🍝' },
+  { id: 'japanese', name: 'Japanese', emoji: '🍣' },
+  { id: 'mexican', name: 'Mexican', emoji: '🌮' },
+  { id: 'chinese', name: 'Chinese', emoji: '🥟' },
+  { id: 'indian', name: 'Indian', emoji: '🍛' },
+  { id: 'american', name: 'American', emoji: '🍔' },
+  { id: 'thai', name: 'Thai', emoji: '🍜' },
+  { id: 'french', name: 'French', emoji: '🥐' },
+  { id: 'korean', name: 'Korean', emoji: '🍲' },
+  { id: 'mediterranean', name: 'Mediterranean', emoji: '🥗' },
+  { id: 'seafood', name: 'Seafood', emoji: '🦐' },
+  { id: 'vegetarian', name: 'Vegetarian', emoji: '🥕' },
+  { id: 'desserts', name: 'Desserts', emoji: '🍰' },
+  { id: 'pizza', name: 'Pizza', emoji: '🍕' },
+  { id: 'bbq', name: 'BBQ', emoji: '🍖' },
+  { id: 'breakfast', name: 'Breakfast', emoji: '🥞' },
+];
 
 function normalizeTags(arr) {
   return Array.isArray(arr)
     ? arr.map((t) => String(t).trim().toLowerCase()).filter(Boolean)
     : [];
 }
+
 function jaccard(aArr, bArr) {
   const A = new Set(normalizeTags(aArr));
   const B = new Set(normalizeTags(bArr));
@@ -23,55 +43,18 @@ export default function ForYouScreen({ navigation }) {
   const [nearby, setNearby] = useState([]);
   const [loading, setLoading] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [userPreferences, setUserPreferences] = useState([]);
+  const [showPreferences, setShowPreferences] = useState(false);
+  const [flippedCards, setFlippedCards] = useState(new Set());
+  const [flipAnimations, setFlipAnimations] = useState(new Map());
 
-  const pan = useRef(new Animated.ValueXY()).current;
-  const rotate = useRef(new Animated.Value(0)).current;
-  const opacity = useRef(new Animated.Value(1)).current;
+  const panRef = useRef(new Animated.ValueXY());
+  const rotateRef = useRef(new Animated.Value(0));
+  const opacityRef = useRef(new Animated.Value(1));
 
-  const fetchLikesForUsers = async (userIds) => {
-    if (!userIds.length) return {};
-    const { data: pRows, error: pErr } = await supabase
-      .from('profiles')
-      .select('user_id, likes')
-      .in('user_id', userIds);
-    let map = {};
-    if (!pErr && Array.isArray(pRows) && pRows.length) {
-      for (const r of pRows) map[r.user_id] = normalizeTags(r.likes);
-    }
-    const missing = userIds.filter((id) => !map[id]);
-    if (missing.length) {
-      const { data: plRows, error: plErr } = await supabase
-        .from('profile_likes')
-        .select('user_id, tag')
-        .in('user_id', missing);
-      if (!plErr && Array.isArray(plRows)) {
-        const agg = {};
-        for (const r of plRows) {
-          agg[r.user_id] = agg[r.user_id] || [];
-          agg[r.user_id].push(r.tag);
-        }
-        for (const id of missing) map[id] = normalizeTags(agg[id] || []);
-      }
-    }
-    return map;
-  };
-
-  const fetchMyLikes = async (myId) => {
-    const { data: prof } = await supabase
-      .from('profiles')
-      .select('likes')
-      .eq('user_id', myId)
-      .maybeSingle();
-    let likes = normalizeTags(prof?.likes || []);
-    if (likes.length === 0) {
-      const { data: rows } = await supabase
-        .from('profile_likes')
-        .select('tag')
-        .eq('user_id', myId);
-      likes = normalizeTags((rows || []).map((r) => r.tag));
-    }
-    return likes;
-  };
+  const pan = panRef.current;
+  const rotate = rotateRef.current;
+  const opacity = opacityRef.current;
 
   const ensureLocationAndLoad = useCallback(async () => {
     setLoading(true);
@@ -79,29 +62,160 @@ export default function ForYouScreen({ navigation }) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Please sign in');
 
-      const { data: me } = await supabase
-        .from('users_public')
-        .select('zipcode')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      const zipcode = typeof me?.zipcode === 'string' ? parseInt(me.zipcode) : me?.zipcode;
-      if (!Number.isInteger(zipcode)) {
+      // Try to get zipcode with retry mechanism for database consistency
+      let zipcode = null;
+      for (let i = 0; i < 3; i++) {
+        const { data: me } = await supabase
+          .from('users_public')
+          .select('zipcode')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        let rawZipcode = me?.zipcode;
+        if (typeof rawZipcode === 'string') {
+          rawZipcode = parseInt(rawZipcode.trim());
+        }
+
+        if (Number.isInteger(rawZipcode) && rawZipcode >= 10000 && rawZipcode <= 99999) {
+          zipcode = rawZipcode;
+          break;
+        }
+
+        if (i < 2) await new Promise(r => setTimeout(r, 300));
+      }
+
+      if (!zipcode) {
         Alert.alert('Zipcode needed','Set your zipcode to find matches in your area.',
           [{ text:'Set now', onPress:()=>navigation.replace?.('LocationScreen') }]);
         setNearby([]); return;
       }
 
-      const { data: near, error: e1 } = await supabase.rpc('zipcode_matches_with_likes', { p_zipcode_range: 2, p_limit: 20 });
-      if (e1) throw e1;
+      // Try RPC function first, fallback to direct queries
+      let near, myLikesArr;
 
-      const { data: myLikesArr, error: e2 } = await supabase.rpc('my_likes');
-      if (e2) throw e2;
+      // Get potential matches by zipcode
+      try {
+        const { data, error } = await supabase.rpc('zipcode_matches_with_likes', { p_limit: 20, p_zipcode_range: 2 });
+        if (error) throw error;
+        near = data;
 
+        // Enrich RPC data with profile photos
+        if (near && near.length > 0) {
+          const userIds = near.map(u => u.target_user_id).filter(Boolean);
+          if (userIds.length > 0) {
+            const { data: profiles } = await supabase
+              .from('profiles')
+              .select('user_id, profile_photo')
+              .in('user_id', userIds);
+
+            const photoMap = {};
+            for (const profile of profiles || []) {
+              photoMap[profile.user_id] = profile.profile_photo;
+            }
+
+            // Add profile photos to the user data
+            near = near.map(user => ({
+              ...user,
+              profile_photo: photoMap[user.target_user_id] || null
+            }));
+          }
+        }
+      } catch (rpcError) {
+        console.log('RPC zipcode_matches_with_likes failed, using fallback query:', rpcError.message);
+
+        // Fallback: Get users within zipcode range manually
+        const zipcodeMin = zipcode - 2;
+        const zipcodeMax = zipcode + 2;
+
+        const { data: users, error: usersError } = await supabase
+          .from('users_public')
+          .select('user_id, name, zipcode')
+          .neq('user_id', user.id) // Exclude current user
+          .gte('zipcode', zipcodeMin)
+          .lte('zipcode', zipcodeMax)
+          .limit(20);
+
+        if (usersError) throw usersError;
+
+        console.log('Found users in zipcode range:', users);
+
+        if (users && users.length > 0) {
+          // Get their preferences
+          const userIds = users.map(u => u.user_id);
+          let userLikes = {};
+
+          console.log('Fetching profiles for user IDs:', userIds);
+
+          const { data: profiles, error: profilesError } = await supabase
+            .from('profiles')
+            .select('user_id, likes, profile_photo')
+            .in('user_id', userIds);
+
+          console.log('Profiles query result:', { profiles, profilesError });
+
+          for (const profile of profiles || []) {
+            // Ensure likes is an array
+            const profileLikes = Array.isArray(profile.likes) ? profile.likes : [];
+            userLikes[profile.user_id] = {
+              likes: profileLikes,
+              profile_photo: profile.profile_photo
+            };
+            console.log(`User ${profile.user_id} likes:`, profileLikes);
+          }
+
+          // Format data to match RPC function output
+          near = users.map(u => {
+            const userProfile = userLikes[u.user_id] || { likes: [], profile_photo: null };
+            const userPreferences = userProfile.likes || [];
+            console.log(`Mapping user ${u.user_id} (${u.name}) with likes:`, userPreferences);
+
+            return {
+              target_user_id: u.user_id,
+              name: u.name,
+              zipcode: u.zipcode,
+              likes: userPreferences,
+              profile_photo: userProfile.profile_photo,
+              zipcode_diff: Math.abs(u.zipcode - zipcode)
+            };
+          });
+
+          console.log('Final fallback data:', near);
+        } else {
+          // No users found in database
+          near = [];
+          console.log('No users found in zipcode range');
+        }
+      }
+
+      // Get current user's likes
+      try {
+        const { data, error } = await supabase.rpc('my_likes');
+        if (error) throw error;
+        myLikesArr = data;
+      } catch (rpcError) {
+        console.log('RPC my_likes failed, using fallback query:', rpcError.message);
+
+        // Fallback: Get likes from profiles table
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('likes')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        myLikesArr = profile?.likes || [];
+      }
+
+      console.log('Current user raw likes:', myLikesArr);
       const myLikes = normalizeTags(myLikesArr || []);
-      const rows = Array.isArray(near) ? near : [];
+      console.log('Current user normalized likes:', myLikes);
 
+      // Set user preferences for display
+      setUserPreferences(myLikesArr || []);
+
+      const rows = Array.isArray(near) ? near : [];
       const enriched = rows.map(r => {
-        const { score, inter } = jaccard(myLikes, r.likes || []);
+        const otherUserLikes = normalizeTags(r.likes || []);
+        const { score, inter } = jaccard(myLikes, otherUserLikes);
         return { ...r, score, commonLikes: inter };
       }).sort((a,b)=> (b.score-a.score) || ((a.zipcode_diff||1e9)-(b.zipcode_diff||1e9)));
 
@@ -120,8 +234,7 @@ export default function ForYouScreen({ navigation }) {
     try {
       const targetId = row.target_user_id || row.id;
       const res = await likeUser(targetId, true);
-      if (res.matched) Alert.alert('Matched! 🎉', `Match #${res.match_id}`);
-      else Alert.alert('Liked', 'waiting for like');
+      // Removed "Matched!" popup - users can see matches in the Matches tab
     } catch (e) {
       Alert.alert('Like error', e.message || String(e));
     }
@@ -129,6 +242,37 @@ export default function ForYouScreen({ navigation }) {
 
   const onPass = () => {
     // Just advance to next card, no API call needed
+  };
+
+  const togglePreference = (categoryId) => {
+    setUserPreferences(prev =>
+      prev.includes(categoryId)
+        ? prev.filter(id => id !== categoryId)
+        : [...prev, categoryId]
+    );
+  };
+
+  const savePreferences = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Please sign in');
+
+      const { error } = await supabase
+        .from('profiles')
+        .upsert({
+          user_id: user.id,
+          likes: userPreferences,
+        });
+
+      if (error) throw error;
+
+      Alert.alert('Success', 'Food preferences updated successfully!');
+      setShowPreferences(false);
+      // Reload matches with new preferences
+      ensureLocationAndLoad();
+    } catch (error) {
+      Alert.alert('Error', error.message || 'Failed to save preferences');
+    }
   };
 
   const handleLikeButton = () => {
@@ -153,6 +297,49 @@ export default function ForYouScreen({ navigation }) {
   const nextCard = () => {
     setCurrentIndex(prev => prev + 1);
     resetCard();
+    // Clear flipped cards and animations when moving to next
+    setFlippedCards(new Set());
+    setFlipAnimations(new Map());
+  };
+
+  const getOrCreateFlipAnimation = (cardId) => {
+    if (!flipAnimations.has(cardId)) {
+      setFlipAnimations(prev => {
+        const newMap = new Map(prev);
+        newMap.set(cardId, new Animated.Value(0));
+        return newMap;
+      });
+    }
+    return flipAnimations.get(cardId) || new Animated.Value(0);
+  };
+
+  const toggleCardFlip = (cardId) => {
+    const isCurrentlyFlipped = flippedCards.has(cardId);
+
+    // Get or create animation
+    let flipAnimation = flipAnimations.get(cardId);
+    if (!flipAnimation) {
+      flipAnimation = new Animated.Value(0);
+      setFlipAnimations(prev => new Map(prev).set(cardId, flipAnimation));
+    }
+
+    // Animate the flip
+    Animated.spring(flipAnimation, {
+      toValue: isCurrentlyFlipped ? 0 : 1,
+      duration: 600,
+      useNativeDriver: true,
+    }).start();
+
+    // Update the flipped state
+    setFlippedCards(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(cardId)) {
+        newSet.delete(cardId);
+      } else {
+        newSet.add(cardId);
+      }
+      return newSet;
+    });
   };
 
   const forceSwipe = (direction) => {
@@ -180,34 +367,73 @@ export default function ForYouScreen({ navigation }) {
 
   const panResponder = PanResponder.create({
     onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: (evt, gestureState) => {
+      // Only set pan responder if there's significant movement
+      const minMoveDistance = 10;
+      return Math.abs(gestureState.dx) > minMoveDistance || Math.abs(gestureState.dy) > minMoveDistance;
+    },
+    onPanResponderGrant: (evt, gestureState) => {
+      // Store initial position for gesture detection
+      pan.setOffset({
+        x: pan.x._value,
+        y: pan.y._value,
+      });
+    },
     onPanResponderMove: (event, gestureState) => {
-      pan.setValue({ x: gestureState.dx, y: gestureState.dy });
-
-      // Calculate rotation based on horizontal movement
-      const rotation = gestureState.dx * 0.1; // Adjust multiplier for sensitivity
-      rotate.setValue(rotation);
+      // Only animate if there's significant horizontal movement
+      const minMoveDistance = 10;
+      if (Math.abs(gestureState.dx) > minMoveDistance) {
+        pan.setValue({ x: gestureState.dx, y: gestureState.dy });
+        const rotation = gestureState.dx * 0.1;
+        rotate.setValue(rotation);
+      }
     },
     onPanResponderRelease: (event, gestureState) => {
-      const swipeThreshold = 120;
+      pan.flattenOffset();
 
+      const swipeThreshold = 80;
+      const totalMovement = Math.abs(gestureState.dx) + Math.abs(gestureState.dy);
+      const tapThreshold = 15;
+
+      // If minimal movement, treat as tap for card flip
+      if (totalMovement < tapThreshold) {
+        const currentUser = nearby[currentIndex];
+        if (currentUser) {
+          const cardId = currentUser.target_user_id || currentUser.id || currentIndex;
+          toggleCardFlip(cardId);
+        }
+
+        // Reset card position
+        Animated.parallel([
+          Animated.spring(pan, {
+            toValue: { x: 0, y: 0 },
+            useNativeDriver: false,
+          }),
+          Animated.spring(rotate, {
+            toValue: 0,
+            useNativeDriver: false,
+          }),
+        ]).start();
+
+        return;
+      }
+
+      // If significant horizontal movement, treat as swipe
       if (Math.abs(gestureState.dx) > swipeThreshold) {
-        // Swipe threshold reached - force complete the swipe
         const direction = gestureState.dx > 0 ? 'right' : 'left';
 
         if (direction === 'right') {
-          // Like the user
           const currentUser = nearby[currentIndex];
           if (currentUser) {
             onLike(currentUser);
           }
         } else {
-          // Pass on the user
           onPass();
         }
 
         forceSwipe(direction);
       } else {
-        // Snap back to center
+        // Not enough movement for swipe, spring back to center
         Animated.parallel([
           Animated.spring(pan, {
             toValue: { x: 0, y: 0 },
@@ -232,14 +458,38 @@ export default function ForYouScreen({ navigation }) {
     const percent = Math.round((item.score || 0) * 100);
     const isTopCard = index === currentIndex;
     const isSecondCard = index === currentIndex + 1;
+    const cardId = item.target_user_id || item.id || index;
+    const isFlipped = flippedCards.has(cardId);
+    const flipAnimation = flipAnimations.get(cardId) || new Animated.Value(0);
 
-    if (index < currentIndex) return null; // Already swiped
-    if (index > currentIndex + 2) return null; // Too far down the stack
+    if (index < currentIndex) return null;
+    if (index > currentIndex + 2) return null;
 
     const rotateStr = rotate.interpolate({
       inputRange: [-300, 0, 300],
       outputRange: ['-30deg', '0deg', '30deg'],
       extrapolate: 'clamp',
+    });
+
+    // Flip animation interpolations
+    const frontRotateY = flipAnimation.interpolate({
+      inputRange: [0, 1],
+      outputRange: ['0deg', '180deg'],
+    });
+
+    const backRotateY = flipAnimation.interpolate({
+      inputRange: [0, 1],
+      outputRange: ['180deg', '360deg'],
+    });
+
+    const frontOpacity = flipAnimation.interpolate({
+      inputRange: [0, 0.5, 1],
+      outputRange: [1, 0, 0],
+    });
+
+    const backOpacity = flipAnimation.interpolate({
+      inputRange: [0, 0.5, 1],
+      outputRange: [0, 0, 1],
     });
 
     const animatedStyle = isTopCard ? {
@@ -252,7 +502,7 @@ export default function ForYouScreen({ navigation }) {
 
     return (
       <Animated.View
-        key={item.target_user_id || item.id || index}
+        key={cardId}
         style={[
           styles.card,
           isTopCard ? styles.topCard : isSecondCard ? styles.secondCard : styles.hiddenCard,
@@ -260,41 +510,86 @@ export default function ForYouScreen({ navigation }) {
         ]}
         {...(isTopCard ? panResponder.panHandlers : {})}
       >
-        <View style={styles.cardContent}>
-          <Text style={styles.userName}>
-            {item.name || 'User'}
-          </Text>
-          <Text style={styles.userDistance}>
-            Zipcode: {item.zipcode}
-          </Text>
-          <Text style={styles.similarity}>
-            {percent}% match
-          </Text>
-
-          {item.commonLikes?.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Common interests:</Text>
-              <View style={styles.chipContainer}>
-                {item.commonLikes.slice(0, 6).map((t) => (
-                  <Chip key={`c-${item.target_user_id}-${t}`} text={`#${t}`} />
-                ))}
+        <View style={styles.cardTouchable}>
+          {/* Front of card */}
+          <Animated.View
+            style={[
+              styles.cardFace,
+              styles.cardFront,
+              {
+                opacity: frontOpacity,
+                transform: [{ rotateY: frontRotateY }],
+              },
+            ]}
+          >
+            <View style={styles.cardContent}>
+              {item.profile_photo && (
+                <View style={styles.photoContainer}>
+                  <Image source={{ uri: item.profile_photo }} style={styles.profilePhoto} />
+                </View>
+              )}
+              <Text style={styles.userName}>
+                {item.name || 'User'}
+              </Text>
+              <Text style={styles.similarity}>
+                {percent}% match
+              </Text>
+              <View style={styles.tapHint}>
+                <Text style={styles.tapHintText}>👆 Tap to see food preferences</Text>
               </View>
             </View>
-          )}
+          </Animated.View>
 
-          {item.likes?.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Their food preferences:</Text>
-              <View style={styles.chipContainer}>
-                {item.likes.slice(0, 8).map((t) => (
-                  <Chip key={`l-${item.target_user_id}-${t}`} text={`#${t}`} />
-                ))}
+          {/* Back of card */}
+          <Animated.View
+            style={[
+              styles.cardFace,
+              styles.cardBack,
+              {
+                opacity: backOpacity,
+                transform: [{ rotateY: backRotateY }],
+              },
+            ]}
+          >
+            <View style={styles.cardContent}>
+              <View style={styles.backHeader}>
+                <Text style={styles.backUserName}>
+                  {item.name || 'User'}
+                </Text>
+                <Text style={styles.backSimilarity}>
+                  {percent}% match
+                </Text>
+              </View>
+
+              {item.commonLikes?.length > 0 && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>🤝 Common interests:</Text>
+                  <View style={styles.chipContainer}>
+                    {item.commonLikes.slice(0, 6).map((t, i) => (
+                      <Chip key={`c-${cardId}-${t}-${i}`} text={`#${t}`} />
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {item.likes?.length > 0 && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>🍽️ Their food preferences:</Text>
+                  <View style={styles.chipContainer}>
+                    {item.likes.slice(0, 8).map((t, i) => (
+                      <Chip key={`l-${cardId}-${t}-${i}`} text={`#${t}`} />
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              <View style={styles.tapHint}>
+                <Text style={styles.tapHintText}>👆 Tap to go back</Text>
               </View>
             </View>
-          )}
+          </Animated.View>
         </View>
 
-        {/* Swipe indicators */}
         {isTopCard && (
           <>
             <Animated.View
@@ -339,39 +634,90 @@ export default function ForYouScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-       <Text style={styles.title}>Find Your Match</Text>
-          <TouchableOpacity
-            onPress={() => navigation.navigate('MatchesScreen')}
-            style={{ position: 'absolute', right: 16, top: 60, paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderRadius: 10, backgroundColor: '#fff' }}
-          >
-          <Text style={{ fontWeight: '600' }}>Matches</Text>
-          </TouchableOpacity>
-        </View>
-      {loading && <Text style={styles.loading}>Loading...</Text>}
-
-      <View style={styles.cardStack}>
-        {nearby.map((item, index) => renderCard(item, index))}
-
-        {currentIndex >= nearby.length && !loading && (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>No more matches!</Text>
-            <TouchableOpacity style={styles.refreshButton} onPress={ensureLocationAndLoad}>
-              <Text style={styles.refreshText}>Refresh</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+        <Text style={styles.title}>Find Your Match</Text>
+        <TouchableOpacity
+          style={styles.preferencesButton}
+          onPress={() => setShowPreferences(!showPreferences)}
+        >
+          <Text style={styles.preferencesButtonText}>
+            {showPreferences ? '✕' : '⚙️'} Preferences
+          </Text>
+        </TouchableOpacity>
       </View>
 
-      {currentUser && (
-        <View style={styles.actionButtons}>
-          <TouchableOpacity style={styles.passButton} onPress={handlePassButton}>
-            <Text style={styles.passButtonText}>←</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.likeButton} onPress={handleLikeButton}>
-            <Text style={styles.likeButtonText}>→</Text>
+      {showPreferences && (
+        <View style={styles.preferencesSection}>
+          <Text style={styles.preferencesTitle}>Your Food Preferences</Text>
+          <Text style={styles.preferencesSubtitle}>
+            Tap to select/deselect ({userPreferences.length} selected)
+          </Text>
+          <View style={styles.categoriesContainer}>
+            {FOOD_CATEGORIES.map(category => {
+              const isSelected = userPreferences.includes(category.id);
+              return (
+                <TouchableOpacity
+                  key={category.id}
+                  style={[styles.categoryCard, isSelected && styles.selectedCard]}
+                  onPress={() => togglePreference(category.id)}
+                >
+                  <Text style={styles.emoji}>{category.emoji}</Text>
+                  <Text style={[styles.categoryName, isSelected && styles.selectedText]}>
+                    {category.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <TouchableOpacity style={styles.saveButton} onPress={savePreferences}>
+            <Text style={styles.saveButtonText}>Save Changes</Text>
           </TouchableOpacity>
         </View>
+      )}
+
+      {loading && <Text style={styles.loading}>Loading...</Text>}
+
+      {!showPreferences && (
+        <>
+          <View style={styles.cardStack}>
+            {nearby.map((item, index) => renderCard(item, index))}
+
+            {nearby.length === 0 && !loading && (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>No users found in your area</Text>
+                <Text style={styles.emptySubtext}>
+                  Try expanding your search radius or check back later for new users!
+                </Text>
+                <TouchableOpacity style={styles.refreshButton} onPress={ensureLocationAndLoad}>
+                  <Text style={styles.refreshText}>Refresh</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {currentIndex >= nearby.length && nearby.length > 0 && !loading && (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>No more matches!</Text>
+                <Text style={styles.emptySubtext}>
+                  You've seen all users in your area. Check back later for new matches!
+                </Text>
+                <TouchableOpacity style={styles.refreshButton} onPress={ensureLocationAndLoad}>
+                  <Text style={styles.refreshText}>Refresh</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+
+          {currentUser && (
+            <View style={styles.actionButtons}>
+              <TouchableOpacity style={styles.passButton} onPress={handlePassButton}>
+                <Text style={styles.passButtonText}>←</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.likeButton} onPress={handleLikeButton}>
+                <Text style={styles.likeButtonText}>→</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </>
       )}
     </View>
   );
@@ -387,6 +733,90 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 20,
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  preferencesButton: {
+    backgroundColor: 'white',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 15,
+  },
+  preferencesButtonText: {
+    color: '#ffb6c1',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  preferencesSection: {
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    marginHorizontal: 20,
+    marginBottom: 20,
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 5,
+  },
+  preferencesTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 5,
+  },
+  preferencesSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 15,
+  },
+  categoriesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 15,
+  },
+  categoryCard: {
+    width: (width - 80) / 3,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  selectedCard: {
+    backgroundColor: '#ffb6c1',
+    borderColor: '#ff8fa3',
+  },
+  emoji: {
+    fontSize: 24,
+    marginBottom: 5,
+  },
+  categoryName: {
+    fontSize: 11,
+    color: '#666',
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  selectedText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  saveButton: {
+    backgroundColor: '#ffb6c1',
+    borderRadius: 15,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  saveButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   title: {
     fontSize: 28,
@@ -430,9 +860,39 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.9 }, { translateY: 20 }],
     opacity: 0.6,
   },
+  cardTouchable: {
+    flex: 1,
+  },
+  cardFace: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backfaceVisibility: 'hidden',
+  },
+  cardFront: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+  },
+  cardBack: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+  },
   cardContent: {
     padding: 30,
     flex: 1,
+  },
+  photoContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  profilePhoto: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 3,
+    borderColor: '#ffb6c1',
   },
   userName: {
     fontSize: 32,
@@ -532,7 +992,15 @@ const styles = StyleSheet.create({
     fontSize: 24,
     color: 'white',
     fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  emptySubtext: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.8)',
+    textAlign: 'center',
     marginBottom: 20,
+    lineHeight: 22,
+    paddingHorizontal: 20,
   },
   refreshButton: {
     backgroundColor: 'white',
@@ -571,5 +1039,34 @@ const styles = StyleSheet.create({
     color: '#ff6b6b',
     fontSize: 24,
     fontWeight: 'bold',
+  },
+  // Flip card styles
+  backHeader: {
+    alignItems: 'center',
+    marginBottom: 30,
+  },
+  backUserName: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 5,
+  },
+  backSimilarity: {
+    fontSize: 18,
+    color: '#ffb6c1',
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  tapHint: {
+    marginTop: 'auto',
+    alignItems: 'center',
+    paddingVertical: 15,
+  },
+  tapHintText: {
+    fontSize: 14,
+    color: '#999',
+    fontStyle: 'italic',
+    textAlign: 'center',
   },
 });
