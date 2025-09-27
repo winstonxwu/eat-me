@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, Alert, TouchableOpacity, StyleSheet, Dimensions, Animated, PanResponder } from 'react-native';
-import { getNearby, likeUser } from '../lib/api';
+import { likeUser } from '../lib/api';
 import { supabase } from '../utils/supabase';
 
 const { width, height } = Dimensions.get('window');
@@ -81,18 +81,17 @@ export default function ForYouScreen({ navigation }) {
 
       const { data: me } = await supabase
         .from('users_public')
-        .select('lat,lng')
+        .select('zipcode')
         .eq('user_id', user.id)
         .maybeSingle();
-      const lat = typeof me?.lat === 'string' ? parseFloat(me.lat) : me?.lat;
-      const lng = typeof me?.lng === 'string' ? parseFloat(me.lng) : me?.lng;
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        Alert.alert('Location needed','Set your location to find nearby matches.',
+      const zipcode = typeof me?.zipcode === 'string' ? parseInt(me.zipcode) : me?.zipcode;
+      if (!Number.isInteger(zipcode)) {
+        Alert.alert('Zipcode needed','Set your zipcode to find matches in your area.',
           [{ text:'Set now', onPress:()=>navigation.replace?.('LocationScreen') }]);
         setNearby([]); return;
       }
 
-      const { data: near, error: e1 } = await supabase.rpc('nearby_with_likes', { p_radius_m: 8000, p_limit: 20 });
+      const { data: near, error: e1 } = await supabase.rpc('zipcode_matches_with_likes', { p_zipcode_range: 2, p_limit: 20 });
       if (e1) throw e1;
 
       const { data: myLikesArr, error: e2 } = await supabase.rpc('my_likes');
@@ -104,7 +103,7 @@ export default function ForYouScreen({ navigation }) {
       const enriched = rows.map(r => {
         const { score, inter } = jaccard(myLikes, r.likes || []);
         return { ...r, score, commonLikes: inter };
-      }).sort((a,b)=> (b.score-a.score) || ((a.distance_m||1e9)-(b.distance_m||1e9)));
+      }).sort((a,b)=> (b.score-a.score) || ((a.zipcode_diff||1e9)-(b.zipcode_diff||1e9)));
 
       setNearby(enriched);
     } catch (e) {
@@ -266,7 +265,7 @@ export default function ForYouScreen({ navigation }) {
             {item.name || 'User'}
           </Text>
           <Text style={styles.userDistance}>
-            {Math.round(item.distance_m)} meters away
+            Zipcode: {item.zipcode}
           </Text>
           <Text style={styles.similarity}>
             {percent}% match

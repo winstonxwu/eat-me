@@ -10,13 +10,12 @@ export async function signUp(email, password) {
   if (error) throw error;
 }
 
-export async function saveProfile({ name, lat, lng, likes, dislikes }) {
+export async function saveProfile({ name, zipcode, likes, dislikes }) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('not signed in');
   const payload = {
     p_name: name ?? 'User',
-    p_lat: Number.isFinite(lat) ? lat : null,
-    p_lng: Number.isFinite(lng) ? lng : null,
+    p_zipcode: Number.isInteger(zipcode) ? zipcode : null,
     p_likes: Array.isArray(likes) ? likes : [],
     p_dislikes: Array.isArray(dislikes) ? dislikes : [],
   };
@@ -24,8 +23,8 @@ export async function saveProfile({ name, lat, lng, likes, dislikes }) {
   if (error) throw error;
 }
 
-export async function getNearby(radiusM = 8000, limit = 20) {
-  const { data, error } = await supabase.rpc('find_nearby_users', { p_radius_m: radiusM, p_limit: limit });
+export async function getZipcodeMatches(zipcodeRange = 2, limit = 20) {
+  const { data, error } = await supabase.rpc('zipcode_matches_with_likes', { p_zipcode_range: zipcodeRange, p_limit: limit });
   if (error) throw error;
   return data ?? [];
 }

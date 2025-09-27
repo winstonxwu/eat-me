@@ -27,19 +27,21 @@ export default function MatchesScreen({ navigation }) {
       if (partnerIds.length) {
         const { data: ups, error: e2 } = await supabase
           .from('users_public')
-          .select('user_id,name,lat,lng')
+          .select('user_id,name,zipcode')
           .in('user_id', partnerIds);
         if (e2) throw e2;
-        for (const u of ups || []) namesMap[u.user_id] = { name: u.name || 'User' };
+        for (const u of ups || []) namesMap[u.user_id] = { name: u.name || 'User', zipcode: u.zipcode };
       }
 
       const enriched = (ms || []).map(m => {
         const partner = m.user_a === me ? m.user_b : m.user_a;
         const display = namesMap[partner]?.name || 'User';
+        const zipcode = namesMap[partner]?.zipcode;
         return {
           id: m.id,
           partnerId: partner,
           name: display,
+          zipcode: zipcode,
           created_at: m.created_at,
         };
       });
@@ -65,6 +67,7 @@ export default function MatchesScreen({ navigation }) {
       <View style={{ flex: 1 }}>
         <Text style={styles.name}>{item.name}</Text>
         <Text style={styles.meta}>Match #{item.id}</Text>
+        {item.zipcode && <Text style={styles.zipcode}>Zipcode: {item.zipcode}</Text>}
       </View>
       <TouchableOpacity style={styles.btn} onPress={() => openSuggest(item.id, item.name)}>
         <Text style={styles.btnText}>Restaurants Nearby</Text>
@@ -98,6 +101,7 @@ const styles = StyleSheet.create({
   },
   name: { fontSize: 16, fontWeight: '700' },
   meta: { marginTop: 4, opacity: 0.6 },
+  zipcode: { marginTop: 2, opacity: 0.7, fontSize: 14, color: '#666' },
   btn: {
     paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, marginLeft: 12
   },

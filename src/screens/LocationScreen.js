@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Button, Alert, ActivityIndicator, TextInput, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
+import { View, Text, Button, Alert, ActivityIndicator, TextInput, StyleSheet, Dimensions, TouchableOpacity, Keyboard, TouchableWithoutFeedback } from 'react-native';
 import * as Location from 'expo-location';
 import { supabase } from '../utils/supabase';
 import { useFonts, SourGummy_700Bold } from '@expo-google-fonts/sour-gummy';
@@ -37,25 +37,31 @@ export default function LocationScreen({ route, navigation }) {
   const displayName = route.params?.name || null;
 
   const [getting, setGetting] = useState(false);
-  const [lat, setLat] = useState('');
-  const [lng, setLng] = useState('');
+  const [zipcode, setZipcode] = useState('');
 
   let [fontsLoaded] = useFonts({
     SourGummy_700Bold,
   });
 
-  const getLocation = async () => {
+  const getLocationZipcode = async () => {
     try {
       setGetting(true);
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission required', 'Location permission is needed to suggest midpoint restaurants.');
+        Alert.alert('Permission required', 'Location permission is needed to get your zipcode.');
         setGetting(false);
         return;
       }
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      setLat(String(pos.coords.latitude.toFixed(6)));
-      setLng(String(pos.coords.longitude.toFixed(6)));
+      const [reverseGeocode] = await Location.reverseGeocodeAsync({
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+      });
+      if (reverseGeocode?.postalCode) {
+        setZipcode(reverseGeocode.postalCode);
+      } else {
+        Alert.alert('Location error', 'Could not determine zipcode from your location.');
+      }
     } catch (e) {
       Alert.alert('Location error', e.message || String(e));
     } finally {
@@ -64,10 +70,13 @@ export default function LocationScreen({ route, navigation }) {
   };
 
   const saveAndProceed = async () => {
-    const latNum = parseFloat(lat);
-    const lngNum = parseFloat(lng);
-    if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
-        Alert.alert('Invalid coordinates', 'Please enter valid latitude/longitude.');
+    if (!zipcode || zipcode.trim() === '') {
+        Alert.alert('Invalid zipcode', 'Please enter a valid zipcode.');
+        return;
+    }
+    const zipcodeNum = parseInt(zipcode.trim());
+    if (!Number.isInteger(zipcodeNum) || zipcodeNum < 10000 || zipcodeNum > 99999) {
+        Alert.alert('Invalid zipcode', 'Please enter a 5-digit US zipcode.');
         return;
     }
     try {
@@ -76,8 +85,7 @@ export default function LocationScreen({ route, navigation }) {
 
         await supabase.rpc('set_profile', {
         p_name: displayName || user.email?.split('@')[0] || 'User',
-        p_lat: latNum,
-        p_lng: lngNum,
+        p_zipcode: zipcodeNum,
         p_likes: Array.isArray(likes) ? likes : [],
         p_dislikes: []
         });
@@ -86,14 +94,13 @@ export default function LocationScreen({ route, navigation }) {
         for (let i = 0; i < 3; i++) {
         const { data, error } = await supabase
             .from('users_public')
-            .select('lat,lng')
+            .select('zipcode')
             .eq('user_id', user.id)
             .maybeSingle();
         last = data;
         if (error) break;
-        const lt = typeof data?.lat === 'string' ? parseFloat(data.lat) : data?.lat;
-        const lg = typeof data?.lng === 'string' ? parseFloat(data.lng) : data?.lng;
-        if (Number.isFinite(lt) && Number.isFinite(lg)) { ok = true; break; }
+        const zc = typeof data?.zipcode === 'string' ? parseInt(data.zipcode) : data?.zipcode;
+        if (Number.isInteger(zc)) { ok = true; break; }
         await new Promise(r => setTimeout(r, 250));
         }
         if (!ok) console.warn('users_public not ready yet:', last);
@@ -104,41 +111,38 @@ export default function LocationScreen({ route, navigation }) {
     }
     };
 
-  useEffect(() => { getLocation(); }, []);
+  useEffect(() => { getLocationZipcode(); }, []);
 
   return (
-    <View style={styles.wrap}>
-      <FoodEmojiBackground />
-      <View style={styles.content}>
+    <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
+      <View style={styles.wrap}>
+        <FoodEmojiBackground />
+        <View style={styles.content}>
         <Text style={[styles.title, fontsLoaded && { fontFamily: 'SourGummy_700Bold' }]}>Share your location</Text>
-        <Text style={[styles.sub, fontsLoaded && { fontFamily: 'SourGummy_700Bold' }]}>We'll use it to find restaurants near the midpoint.</Text>
+        <Text style={[styles.sub, fontsLoaded && { fontFamily: 'SourGummy_700Bold' }]}>Enter your zipcode to find matches in your area.</Text>
 
         {getting && <ActivityIndicator style={{ marginVertical: 16 }} color="white" />}
 
         <View style={styles.lowerSection}>
           <View style={styles.row}>
             <TextInput
-              style={styles.input}
-              placeholder="Latitude"
+              style={[styles.input, { flex: 0, width: 200, alignSelf: 'center' }]}
+              placeholder="Zipcode (e.g. 90210)"
               placeholderTextColor="rgba(255,255,255,0.7)"
-              keyboardType="decimal-pad"
-              value={lat}
-              onChangeText={setLat}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Longitude"
-              placeholderTextColor="rgba(255,255,255,0.7)"
-              keyboardType="decimal-pad"
-              value={lng}
-              onChangeText={setLng}
+              keyboardType="numeric"
+              maxLength={5}
+              value={zipcode}
+              onChangeText={setZipcode}
+              returnKeyType="done"
+              onSubmitEditing={() => Keyboard.dismiss()}
+              blurOnSubmit={true}
             />
           </View>
 
           <View style={styles.btns}>
-            <TouchableOpacity style={styles.button} onPress={getLocation}>
+            <TouchableOpacity style={styles.button} onPress={getLocationZipcode}>
               <Text style={[styles.buttonText, fontsLoaded && { fontFamily: 'SourGummy_700Bold' }]}>
-                Use current location
+                Get my zipcode
               </Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.button} onPress={saveAndProceed}>
@@ -195,7 +199,7 @@ const styles = StyleSheet.create({
   lowerSection: {
     marginTop: 200,
   },
-  row: { flexDirection: 'row', gap: 10, marginBottom: 40 },
+  row: { flexDirection: 'row', gap: 10, marginBottom: 40, justifyContent: 'center' },
   input: {
     flex: 1,
     backgroundColor: 'rgba(255,255,255,0.2)',

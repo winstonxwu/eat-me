@@ -36,7 +36,7 @@ export default function SuggestionsScreen({ route, navigation }) {
       }, null, 2)
     );
     try {
-      const { data: near } = await supabase.rpc('nearby_with_likes', { p_radius_m: 8000, p_limit: 10 });
+      const { data: near } = await supabase.rpc('zipcode_matches_with_likes', { p_zipcode_range: 2, p_limit: 10 });
       const fallback = (near || []).map(r => ({
         name: `Near midpoint: ${r.name}`,
         rating: null, price: null,
