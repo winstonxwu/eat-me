@@ -55,22 +55,10 @@ export default function MatchesScreen({ navigation }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const openSuggest = async (matchId) => {
-    try {
-      const { data, error } = await supabase.functions.invoke('yelp_suggest', {
-        body: { matchId }
-      });
-      if (error) throw error;
-      const items = data?.candidates || [];
-      if (!items.length) { Alert.alert('No suggestions', 'Try again later'); return; }
-      Alert.alert(
-        'Suggestions',
-        items.slice(0, 3).map(it => `${it.name} • ${it.rating ?? '—'}★ ${it.price ?? ''}`).join('\n')
-      );
-    } catch (e) {
-      Alert.alert('Suggest error', e.message || String(e));
-    }
+  const openSuggest = (matchId, partnerName) => {
+    navigation.navigate('SuggestionsScreen', { matchId, partnerName });
   };
+
 
   const renderItem = ({ item }) => (
     <View style={styles.card}>
@@ -78,8 +66,8 @@ export default function MatchesScreen({ navigation }) {
         <Text style={styles.name}>{item.name}</Text>
         <Text style={styles.meta}>Match #{item.id}</Text>
       </View>
-      <TouchableOpacity style={styles.btn} onPress={() => openSuggest(item.id)}>
-        <Text style={styles.btnText}>お店を提案</Text>
+      <TouchableOpacity style={styles.btn} onPress={() => openSuggest(item.id, item.name)}>
+        <Text style={styles.btnText}>Restaurants Nearby</Text>
       </TouchableOpacity>
     </View>
   );

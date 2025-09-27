@@ -7,7 +7,7 @@ import { useFonts, SourGummy_700Bold } from '@expo-google-fonts/sour-gummy';
 const { width, height } = Dimensions.get('window');
 const foodEmojis = ['🍕', '🍔', '🍟', '🌮', '🍝', '🍜', '🍱', '🍣', '🥘', '🍲', '🥗', '🍰', '🧁', '🍪', '🍩', '🥐', '🥨', '🌭', '🥪', '🍖'];
 
-const NEXT_ROUTE = 'ProfileDetails';
+const NEXT_ROUTE = 'ForYouScreen';
 
 const FoodEmojiBackground = () => {
   const [currentEmoji, setCurrentEmoji] = useState(foodEmojis[0]);
@@ -98,7 +98,7 @@ export default function LocationScreen({ route, navigation }) {
         }
         if (!ok) console.warn('users_public not ready yet:', last);
 
-        navigation.replace('ProfileDetails', { fromLocation: true });
+        navigation.replace('ForYouScreen', { fromLocation: true });
     } catch (e) {
         Alert.alert('Save error', e.message || String(e));
     }

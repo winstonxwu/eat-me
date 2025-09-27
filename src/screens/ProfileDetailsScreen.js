@@ -64,48 +64,11 @@ export default function ProfileDetailsScreen({ navigation }) {
     }
   };
 
-  const uploadImageToSupabase = async (imageUri) => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
-      // Create FormData for React Native
-      const formData = new FormData();
-      formData.append('file', {
-        uri: imageUri,
-        type: 'image/jpeg',
-        name: `profile_${user.id}_${Date.now()}.jpg`,
-      });
-
-      // Upload to Supabase Storage
-      const fileName = `profile_${user.id}_${Date.now()}.jpg`;
-      const { data, error } = await supabase.storage
-        .from('avatars')
-        .upload(fileName, formData, {
-          contentType: 'image/jpeg',
-          upsert: true
-        });
-
-      if (error) throw error;
-
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(fileName);
-
-      return publicUrl;
-    } catch (error) {
-      console.error('Upload error:', error);
-      throw error;
-    }
-  };
-
   const handleContinue = async () => {
     if (!name.trim()) {
       Alert.alert('Name required', 'Please enter your name to continue.');
       return;
     }
-
     if (!selectedImage) {
       Alert.alert('Photo required', 'Please select a food photo that represents your personality.');
       return;
@@ -116,19 +79,17 @@ export default function ProfileDetailsScreen({ navigation }) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      // Upload image and get URL
-      const imageUrl = await uploadImageToSupabase(selectedImage.uri);
+      const imageUrl = await uploadImageToSupabase(selectedImage);
 
-      // Update user profile
-      const { error } = await supabase
-        .from('profiles')
-        .upsert({
-          user_id: user.id,
-          name: name.trim(),
-          profile_photo: imageUrl,
-        });
+      await supabase.from('users_public').upsert({
+        user_id: user.id,
+        name: name.trim(),
+      });
 
-      if (error) throw error;
+      await supabase.from('profiles').upsert({
+        user_id: user.id,
+        profile_photo: imageUrl,
+      });
 
       navigation.replace('ForYouScreen');
     } catch (error) {
@@ -137,6 +98,7 @@ export default function ProfileDetailsScreen({ navigation }) {
       setUploading(false);
     }
   };
+
 
   return (
     <View style={styles.container}>
