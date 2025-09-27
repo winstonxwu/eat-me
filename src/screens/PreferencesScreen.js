@@ -34,6 +34,8 @@ const FOOD_CATEGORIES = [
   { id: 'breakfast', name: 'Breakfast', emoji: '🥞' },
 ];
 
+const NEXT_ROUTE = 'ForYou';
+
 export default function PreferencesScreen({ navigation }) {
   const [selectedPreferences, setSelectedPreferences] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -58,7 +60,6 @@ export default function PreferencesScreen({ navigation }) {
         .select('likes')
         .eq('user_id', userId)
         .maybeSingle();
-
       if (data && data.likes) {
         setSelectedPreferences(data.likes);
       }
@@ -69,14 +70,9 @@ export default function PreferencesScreen({ navigation }) {
 
   const togglePreference = (categoryId) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-    setSelectedPreferences(prev => {
-      if (prev.includes(categoryId)) {
-        return prev.filter(id => id !== categoryId);
-      } else {
-        return [...prev, categoryId];
-      }
-    });
+    setSelectedPreferences(prev =>
+      prev.includes(categoryId) ? prev.filter(id => id !== categoryId) : [...prev, categoryId]
+    );
   };
 
   const savePreferences = async () => {
@@ -84,53 +80,28 @@ export default function PreferencesScreen({ navigation }) {
       Alert.alert('Select Preferences', 'Please select at least one food category you like!');
       return;
     }
-
-    setLoading(true);
-    try {
-      if (!user) {
-        throw new Error('User not found');
-      }
-
-      await supabase.from('profiles').upsert({
-        user_id: user.id,
-        likes: selectedPreferences,
-        dislikes: []
-      });
-
-      await supabase.from('users_public').upsert({
-        user_id: user.id,
-        name: user.email?.split('@')[0] || 'User',
-        lat: 40.7128,
-        lng: -74.0060
-      });
-
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      navigation.replace('ForYou');
-    } catch (error) {
-      Alert.alert('Error', error.message);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    if (!user) {
+      Alert.alert('Error', 'User not found');
+      return;
     }
-    setLoading(false);
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    navigation.replace('LocationScreen', {
+      likes: selectedPreferences,
+      name: user.email?.split('@')[0] || 'User',
+    });
   };
 
   const renderCategory = (category) => {
     const isSelected = selectedPreferences.includes(category.id);
-
     return (
       <TouchableOpacity
         key={category.id}
-        style={[
-          styles.categoryCard,
-          isSelected && styles.selectedCard
-        ]}
+        style={[styles.categoryCard, isSelected && styles.selectedCard]}
         onPress={() => togglePreference(category.id)}
         activeOpacity={0.8}
       >
         <Text style={styles.emoji}>{category.emoji}</Text>
-        <Text style={[
-          styles.categoryName,
-          isSelected && styles.selectedText
-        ]}>
+        <Text style={[styles.categoryName, isSelected && styles.selectedText]}>
           {category.name}
         </Text>
       </TouchableOpacity>
@@ -139,10 +110,7 @@ export default function PreferencesScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <LinearGradient
-        colors={['#667eea', '#764ba2']}
-        style={styles.gradient}
-      >
+      <LinearGradient colors={['#667eea', '#764ba2']} style={styles.gradient}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.header}>
             <Text style={styles.title}>What do you love?</Text>
@@ -181,41 +149,13 @@ export default function PreferencesScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  gradient: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 20,
-    paddingBottom: 30,
-  },
-  header: {
-    paddingTop: 20,
-    paddingBottom: 30,
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: 'white',
-    textAlign: 'center',
-    marginBottom: 10,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: 'rgba(255,255,255,0.8)',
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  categoriesContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginBottom: 30,
-  },
+  container: { flex: 1 },
+  gradient: { flex: 1 },
+  scrollContent: { flexGrow: 1, paddingHorizontal: 20, paddingBottom: 30 },
+  header: { paddingTop: 20, paddingBottom: 30, alignItems: 'center' },
+  title: { fontSize: 32, fontWeight: 'bold', color: 'white', textAlign: 'center', marginBottom: 10 },
+  subtitle: { fontSize: 16, color: 'rgba(255,255,255,0.8)', textAlign: 'center', lineHeight: 22 },
+  categoriesContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 30 },
   categoryCard: {
     width: (width - 60) / 2,
     backgroundColor: 'rgba(255,255,255,0.1)',
@@ -226,34 +166,12 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'transparent',
   },
-  selectedCard: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderColor: 'white',
-    transform: [{ scale: 0.98 }],
-  },
-  emoji: {
-    fontSize: 30,
-    marginBottom: 8,
-  },
-  categoryName: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.8)',
-    textAlign: 'center',
-    fontWeight: '500',
-  },
-  selectedText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  footer: {
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  selectedCount: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 16,
-    marginBottom: 20,
-  },
+  selectedCard: { backgroundColor: 'rgba(255,255,255,0.2)', borderColor: 'white', transform: [{ scale: 0.98 }] },
+  emoji: { fontSize: 30, marginBottom: 8 },
+  categoryName: { fontSize: 14, color: 'rgba(255,255,255,0.8)', textAlign: 'center', fontWeight: '500' },
+  selectedText: { color: 'white', fontWeight: 'bold' },
+  footer: { alignItems: 'center', marginTop: 20 },
+  selectedCount: { color: 'rgba(255,255,255,0.8)', fontSize: 16, marginBottom: 20 },
   continueButton: {
     backgroundColor: 'white',
     borderRadius: 25,
@@ -267,12 +185,6 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
   },
-  disabledButton: {
-    opacity: 0.5,
-  },
-  continueText: {
-    color: '#667eea',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
+  disabledButton: { opacity: 0.5 },
+  continueText: { color: '#667eea', fontSize: 18, fontWeight: 'bold' },
 });

@@ -14,7 +14,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.winstonxwu.eat-me-app"
+      "bundleIdentifier": "com.winstonxwu.eat-me-app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "We use your location to suggest midpoint restaurants for dates."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -22,10 +25,14 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"],
       "package": "com.winstonxwu.eatmeapp"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-font"
+    ]
   }
 }
