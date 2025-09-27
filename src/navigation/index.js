@@ -1,21 +1,25 @@
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import HomeScreen from '../screens/HomeScreen';
-import ProfileScreen from '../screens/ProfileScreen';
-import SwipeScreen from '../screens/SwipeScreen';
-import MatchesScreen from '../screens/MatchesScreen';
+import LoginScreen from '../screens/LoginScreen';
+import PreferencesScreen from '../screens/PreferencesScreen';
+import ForYouScreen from '../screens/ForYouScreen';
 
 const Stack = createNativeStackNavigator();
 
-export default function RootNavigator() {
+export default function RootNav() {
   return (
     <NavigationContainer>
-      <Stack.Navigator>
-        <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Eat Me' }} />
-        <Stack.Screen name="Profile" component={ProfileScreen} />
-        <Stack.Screen name="Swipe" component={SwipeScreen} />
-        <Stack.Screen name="Matches" component={MatchesScreen} />
+      <Stack.Navigator
+        initialRouteName="Login"
+        screenOptions={{
+          headerShown: false,
+          gestureEnabled: false,
+        }}
+      >
+        <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="Preferences" component={PreferencesScreen} />
+        <Stack.Screen name="ForYou" component={ForYouScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
