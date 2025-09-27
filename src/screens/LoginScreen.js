@@ -39,7 +39,7 @@ const FoodEmojiBackground = () => {
       animatedValues.length = 0;
 
       for (let i = 0; i < numEmojis; i++) {
-        const animatedValue = new Animated.Value(-200);
+        const animatedValue = new Animated.Value(-400);
         animatedValues.push(animatedValue);
 
         emojis.push({
@@ -51,6 +51,7 @@ const FoodEmojiBackground = () => {
           speed: 3000 + Math.random() * 7000, // 3-10 seconds
           delay: Math.random() * 5000, // 0-5 second delay
           animatedValue: animatedValue,
+          isVisible: false,
         });
       }
       setCurrentEmojis(emojis);
@@ -58,14 +59,20 @@ const FoodEmojiBackground = () => {
       // Start animations for each emoji
       emojis.forEach((emoji, index) => {
         const startFalling = () => {
-          emoji.animatedValue.setValue(-200);
+          emoji.animatedValue.setValue(-400);
+          emoji.isVisible = true;
+          setCurrentEmojis([...emojis]); // Trigger re-render to show emoji
+
           Animated.timing(emoji.animatedValue, {
             toValue: height + 100,
             duration: emoji.speed,
             useNativeDriver: true,
           }).start(() => {
-            // Restart the animation when it completes
-            startFalling();
+            emoji.isVisible = false;
+            // Small delay before restarting
+            setTimeout(() => {
+              startFalling();
+            }, 100);
           });
         };
 
@@ -85,7 +92,7 @@ const FoodEmojiBackground = () => {
     <View style={StyleSheet.absoluteFillObject}>
       <View style={styles.gradientBackground} />
       <View style={StyleSheet.absoluteFillObject}>
-        {currentEmojis.map((item) => (
+        {currentEmojis.filter(item => item.isVisible).map((item) => (
           <Animated.Text
             key={item.id}
             style={[

@@ -1,14 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  SafeAreaView,
-  Alert,
-  Dimensions
-} from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, SafeAreaView, Alert, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../utils/supabase';
@@ -34,56 +25,27 @@ const FOOD_CATEGORIES = [
   { id: 'breakfast', name: 'Breakfast', emoji: '🥞' },
 ];
 
-const NEXT_ROUTE = 'ForYou';
-
 export default function PreferencesScreen({ navigation }) {
   const [selectedPreferences, setSelectedPreferences] = useState([]);
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState(null);
 
-  useEffect(() => {
-    getUser();
-  }, []);
-
-  const getUser = async () => {
+  useEffect(() => { (async () => {
     const { data: { user } } = await supabase.auth.getUser();
     setUser(user);
-    if (user) {
-      loadExistingPreferences(user.id);
-    }
-  };
+    if (!user) return;
+    const { data } = await supabase.from('profiles').select('likes').eq('user_id', user.id).maybeSingle();
+    if (data?.likes) setSelectedPreferences(data.likes);
+  })(); }, []);
 
-  const loadExistingPreferences = async (userId) => {
-    try {
-      const { data } = await supabase
-        .from('profiles')
-        .select('likes')
-        .eq('user_id', userId)
-        .maybeSingle();
-      if (data && data.likes) {
-        setSelectedPreferences(data.likes);
-      }
-    } catch (error) {
-      console.error('Error loading preferences:', error);
-    }
-  };
-
-  const togglePreference = (categoryId) => {
+  const togglePreference = (id) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSelectedPreferences(prev =>
-      prev.includes(categoryId) ? prev.filter(id => id !== categoryId) : [...prev, categoryId]
-    );
+    setSelectedPreferences((prev) => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
   };
 
-  const savePreferences = async () => {
-    if (selectedPreferences.length === 0) {
-      Alert.alert('Select Preferences', 'Please select at least one food category you like!');
-      return;
-    }
-    if (!user) {
-      Alert.alert('Error', 'User not found');
-      return;
-    }
+  const continueToLocation = async () => {
+    if (selectedPreferences.length === 0) { Alert.alert('Select at least one'); return; }
+    if (!user) { Alert.alert('Not signed in'); return; }
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     navigation.replace('LocationScreen', {
       likes: selectedPreferences,
@@ -91,19 +53,12 @@ export default function PreferencesScreen({ navigation }) {
     });
   };
 
-  const renderCategory = (category) => {
-    const isSelected = selectedPreferences.includes(category.id);
+  const renderCategory = (c) => {
+    const isSelected = selectedPreferences.includes(c.id);
     return (
-      <TouchableOpacity
-        key={category.id}
-        style={[styles.categoryCard, isSelected && styles.selectedCard]}
-        onPress={() => togglePreference(category.id)}
-        activeOpacity={0.8}
-      >
-        <Text style={styles.emoji}>{category.emoji}</Text>
-        <Text style={[styles.categoryName, isSelected && styles.selectedText]}>
-          {category.name}
-        </Text>
+      <TouchableOpacity key={c.id} style={[styles.categoryCard, isSelected && styles.selectedCard]} onPress={() => togglePreference(c.id)} activeOpacity={0.8}>
+        <Text style={styles.emoji}>{c.emoji}</Text>
+        <Text style={[styles.categoryName, isSelected && styles.selectedText]}>{c.name}</Text>
       </TouchableOpacity>
     );
   };
@@ -114,32 +69,13 @@ export default function PreferencesScreen({ navigation }) {
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.header}>
             <Text style={styles.title}>What do you love?</Text>
-            <Text style={styles.subtitle}>
-              Select your favorite food categories to get personalized recommendations
-            </Text>
+            <Text style={styles.subtitle}>Select your favorite food categories</Text>
           </View>
-
-          <View style={styles.categoriesContainer}>
-            {FOOD_CATEGORIES.map(renderCategory)}
-          </View>
-
+          <View style={styles.categoriesContainer}>{FOOD_CATEGORIES.map(renderCategory)}</View>
           <View style={styles.footer}>
-            <Text style={styles.selectedCount}>
-              {selectedPreferences.length} categories selected
-            </Text>
-
-            <TouchableOpacity
-              style={[
-                styles.continueButton,
-                selectedPreferences.length === 0 && styles.disabledButton,
-                loading && styles.disabledButton
-              ]}
-              onPress={savePreferences}
-              disabled={selectedPreferences.length === 0 || loading}
-            >
-              <Text style={styles.continueText}>
-                {loading ? 'Saving...' : 'Continue to Feed'}
-              </Text>
+            <Text style={styles.selectedCount}>{selectedPreferences.length} selected</Text>
+            <TouchableOpacity style={[styles.continueButton, (selectedPreferences.length===0 || loading) && styles.disabledButton]} onPress={continueToLocation} disabled={selectedPreferences.length===0 || loading}>
+              <Text style={styles.continueText}>{loading ? 'Saving...' : 'Continue'}</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -149,42 +85,19 @@ export default function PreferencesScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  gradient: { flex: 1 },
-  scrollContent: { flexGrow: 1, paddingHorizontal: 20, paddingBottom: 30 },
+  container: { flex: 1 }, gradient: { flex: 1 }, scrollContent: { flexGrow: 1, paddingHorizontal: 20, paddingBottom: 30 },
   header: { paddingTop: 20, paddingBottom: 30, alignItems: 'center' },
   title: { fontSize: 32, fontWeight: 'bold', color: 'white', textAlign: 'center', marginBottom: 10 },
   subtitle: { fontSize: 16, color: 'rgba(255,255,255,0.8)', textAlign: 'center', lineHeight: 22 },
   categoriesContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 30 },
-  categoryCard: {
-    width: (width - 60) / 2,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 15,
-    padding: 20,
-    marginBottom: 15,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
+  categoryCard: { width: (width - 60) / 2, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 15, padding: 20, marginBottom: 15, alignItems: 'center', borderWidth: 2, borderColor: 'transparent' },
   selectedCard: { backgroundColor: 'rgba(255,255,255,0.2)', borderColor: 'white', transform: [{ scale: 0.98 }] },
   emoji: { fontSize: 30, marginBottom: 8 },
   categoryName: { fontSize: 14, color: 'rgba(255,255,255,0.8)', textAlign: 'center', fontWeight: '500' },
   selectedText: { color: 'white', fontWeight: 'bold' },
   footer: { alignItems: 'center', marginTop: 20 },
   selectedCount: { color: 'rgba(255,255,255,0.8)', fontSize: 16, marginBottom: 20 },
-  continueButton: {
-    backgroundColor: 'white',
-    borderRadius: 25,
-    paddingVertical: 15,
-    paddingHorizontal: 40,
-    minWidth: 200,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
+  continueButton: { backgroundColor: 'white', borderRadius: 25, paddingVertical: 15, paddingHorizontal: 40, minWidth: 200, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 },
   disabledButton: { opacity: 0.5 },
   continueText: { color: '#667eea', fontSize: 18, fontWeight: 'bold' },
 });
