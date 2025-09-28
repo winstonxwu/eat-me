@@ -85,26 +85,40 @@ export default function ProfileDetailsScreen({ route, navigation }) {
       } = await supabase.auth.getUser();
       if (authError || !user) throw new Error('Not authenticated');
 
-      let imageUrl = selectedImage?.uri ?? null;
+      // 1) Upload the image and get storage key + public URL (for immediate display if needed)
+      let storageKey = null;
       try {
-        const uploaded = await uploadImageToSupabase(localUri, user.id);
-        const uploadedUrl = typeof uploaded === 'string' ? uploaded : uploaded?.publicUrl || null;
-        if (uploadedUrl) imageUrl = stripBust(uploadedUrl);
-      } catch {}
+        const pickerMime =
+          selectedImage?.mimeType ||
+          selectedImage?.type ||
+          null;
 
+        const uploaded = await uploadImageToSupabase(selectedImage.uri, user.id, pickerMime);
+        storageKey = uploaded?.storageKey || null;
+        // If you wanted a preview URL here, you'd use uploaded.publicUrl, but we store only the key in DB.
+      } catch (e) {
+        console.log('Image upload failed:', e?.message || e);
+        Alert.alert('Upload Error', e?.message || 'Failed to upload image');
+        setUploading(false);
+        return;
+      }
+
+      // 2) Save public profile name
       const { error: up1 } = await supabase.from('users_public').upsert({
         user_id: user.id,
         name: name.trim(),
       });
       if (up1) throw up1;
 
+      // 3) Save profiles row with the STORAGE KEY (not the URL)
       const { error: up2 } = await supabase.from('profiles').upsert({
         user_id: user.id,
-        profile_photo: imageUrl,
+        profile_photo: storageKey, // <- key like <uid>/<timestamp>.jpeg
         likes: likes,
       });
       if (up2) throw up2;
 
+      // 4) Continue to next screen
       navigation.replace('LocationScreen', {
         likes: likes,
         name: name.trim(),
@@ -115,7 +129,7 @@ export default function ProfileDetailsScreen({ route, navigation }) {
       setUploading(false);
     }
   };
-
+  
   return (
     <View style={styles.container}>
       <View style={styles.pinkBackground} />

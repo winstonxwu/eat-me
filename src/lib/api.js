@@ -1,4 +1,5 @@
 import { supabase } from '../utils/supabase';
+import { scheduleMatchNotification } from '../utils/notifications';
 
 export async function signIn(email, password) {
   const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -130,6 +131,23 @@ export async function likeUser(targetUserId, isLike = true) {
     const { data, error } = await supabase.rpc('do_swipe', { p_target: targetUserId, p_is_like: isLike });
     if (error) throw error;
     const row = data?.[0] || { matched: false, match_id: null };
+
+    // If we have a match from the RPC call, trigger notification
+    if (row.matched && row.match_id) {
+      const { data: partnerData } = await supabase
+        .from('users_public')
+        .select('name')
+        .eq('user_id', targetUserId)
+        .single();
+
+      if (partnerData?.name) {
+        scheduleMatchNotification({
+          matchId: row.match_id,
+          partnerName: partnerData.name
+        });
+      }
+    }
+
     return row;
   } catch (rpcError) {
     console.log('RPC do_swipe failed, using fallback:', rpcError.message);
@@ -178,6 +196,21 @@ export async function likeUser(targetUserId, isLike = true) {
         .single();
 
       if (matchError) throw matchError;
+
+      // Get the partner's name for the notification
+      const { data: partnerData } = await supabase
+        .from('users_public')
+        .select('name')
+        .eq('user_id', targetUserId)
+        .single();
+
+      // Schedule match notification
+      if (partnerData?.name) {
+        scheduleMatchNotification({
+          matchId: match.id,
+          partnerName: partnerData.name
+        });
+      }
 
       return { matched: true, match_id: match.id };
     }

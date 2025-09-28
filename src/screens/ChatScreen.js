@@ -129,7 +129,35 @@ const MessageBubble = ({ message, isMe, onReaction, reaction }) => {
           </Text>
           <View style={styles.messageFooter}>
             <Text style={styles.messageTime}>
-              {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {(() => {
+                try {
+                  // Create date and manually convert to EST (UTC-5)
+                  const date = new Date(message.created_at);
+
+                  // Get current date to check if DST is active
+                  const now = new Date();
+                  const currentYear = now.getFullYear();
+
+                  // DST starts second Sunday in March, ends first Sunday in November
+                  const dstStart = new Date(currentYear, 2, 14 - new Date(currentYear, 2, 1).getDay());
+                  const dstEnd = new Date(currentYear, 10, 7 - new Date(currentYear, 10, 1).getDay());
+
+                  const isDST = now >= dstStart && now < dstEnd;
+                  const offset = isDST ? -4 : -5; // EDT (-4) or EST (-5)
+
+                  // Apply EST/EDT offset
+                  const estTime = new Date(date.getTime() + (offset * 60 * 60 * 1000));
+
+                  return estTime.toLocaleTimeString('en-US', {
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    hour12: true
+                  });
+                } catch (error) {
+                  console.error('Time conversion error:', error);
+                  return 'Invalid time';
+                }
+              })()}
             </Text>
             {message.read_at && isMe && (
               <Ionicons name="checkmark-done" size={16} color="#4CAF50" style={styles.readIndicator} />
@@ -180,65 +208,68 @@ export default function ChatScreen({ route, navigation }) {
   const flatListRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const pollingIntervalRef = useRef(null);
-  const lastMessageIdRef = useRef(null);
+  const lastPollTimeRef = useRef(new Date().toISOString());
   const [fontsLoaded] = useFonts({ SourGummy_700Bold });
 
-  // Polling function to check for new messages
+  // Simplified polling function to check for new messages
   const pollForNewMessages = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Get messages newer than the last known message
-      let query = supabase
+      console.log('Polling for new messages...', { matchId, lastPoll: lastPollTimeRef.current });
+
+      // Get all messages newer than our last poll time
+      const { data: newMessages, error } = await supabase
         .from('messages')
         .select('*')
         .eq('match_id', matchId)
+        .gt('created_at', lastPollTimeRef.current)
         .is('deleted_at', null)
         .order('created_at', { ascending: true });
-
-      if (lastMessageIdRef.current) {
-        query = query.gt('created_at',
-          (await supabase
-            .from('messages')
-            .select('created_at')
-            .eq('id', lastMessageIdRef.current)
-            .single()).data?.created_at || new Date().toISOString()
-        );
-      }
-
-      const { data: newMessages, error } = await query;
 
       if (error) {
         console.error('Polling error:', error);
         return;
       }
 
+      console.log('Polling result:', { found: newMessages?.length || 0 });
+
       if (newMessages && newMessages.length > 0) {
         console.log('Found new messages via polling:', newMessages.length);
 
+        // Process messages to handle both content types
         const processedMessages = newMessages.map(msg => ({
           ...msg,
-          content: msg.content || msg.encrypted_content
+          content: msg.content || msg.encrypted_content || 'Message content unavailable'
         }));
 
+        // Update messages state
         setMessages(prev => {
           const existingIds = new Set(prev.map(m => m.id));
           const uniqueNewMessages = processedMessages.filter(m => !existingIds.has(m.id));
 
           if (uniqueNewMessages.length > 0) {
-            // Update last message ID
-            lastMessageIdRef.current = uniqueNewMessages[uniqueNewMessages.length - 1].id;
+            console.log('Adding new messages to chat:', uniqueNewMessages.map(m => m.content));
+
+            // Update last poll time to the newest message timestamp
+            const newestMessage = uniqueNewMessages[uniqueNewMessages.length - 1];
+            lastPollTimeRef.current = newestMessage.created_at;
 
             // Auto-scroll to bottom
             setTimeout(() => {
               flatListRef.current?.scrollToEnd({ animated: true });
             }, 100);
+
+            return [...prev, ...uniqueNewMessages];
           }
 
-          return [...prev, ...uniqueNewMessages];
+          return prev;
         });
       }
+
+      // Update last poll time even if no messages found
+      lastPollTimeRef.current = new Date().toISOString();
     } catch (error) {
       console.error('Polling for messages failed:', error);
     }
@@ -254,9 +285,14 @@ export default function ChatScreen({ route, navigation }) {
       const initialMessages = await loadMessages(matchId, 50);
       setMessages(initialMessages);
 
-      // Store the latest message ID for polling
+      // Set the last poll time to the most recent message timestamp (or now if no messages)
       if (initialMessages.length > 0) {
-        lastMessageIdRef.current = initialMessages[initialMessages.length - 1].id;
+        const mostRecentMessage = initialMessages[initialMessages.length - 1];
+        lastPollTimeRef.current = mostRecentMessage.created_at;
+        console.log('Set initial poll time to:', lastPollTimeRef.current);
+      } else {
+        lastPollTimeRef.current = new Date().toISOString();
+        console.log('No initial messages, setting poll time to now');
       }
 
       // Get personalized conversation starters
@@ -282,30 +318,36 @@ export default function ChatScreen({ route, navigation }) {
             filter: `match_id=eq.${matchId}`,
           },
           (payload) => {
-            console.log('Real-time message received:', payload);
+            console.log('🔄 Real-time message received:', payload);
             const newMessage = payload.new;
-            // Handle both sent and received messages for real-time updates
+
+            // Process message content
             const messageContent = newMessage.content || newMessage.encrypted_content;
             const processedMessage = {
               ...newMessage,
               content: messageContent
             };
 
-            console.log('Processing real-time message:', {
+            console.log('📝 Processing real-time message:', {
               sender: newMessage.sender_id,
               currentUser: user.id,
               content: processedMessage.content,
-              isFromOtherUser: newMessage.sender_id !== user.id
+              isFromSelf: newMessage.sender_id === user.id
             });
 
             setMessages(prev => {
               // Check if message already exists to avoid duplicates
               const messageExists = prev.some(msg => msg.id === processedMessage.id);
               if (messageExists) {
-                console.log('Message already exists, skipping');
+                console.log('⚠️ Message already exists, skipping duplicate');
                 return prev;
               }
-              console.log('Adding new message to chat:', processedMessage.content);
+
+              console.log('✅ Adding new message to chat via real-time');
+
+              // Update last poll time to this message's timestamp
+              lastPollTimeRef.current = processedMessage.created_at;
+
               return [...prev, processedMessage];
             });
 
@@ -316,7 +358,7 @@ export default function ChatScreen({ route, navigation }) {
           }
         )
         .subscribe((status) => {
-          console.log('Messages subscription status:', status);
+          console.log('📡 Messages subscription status:', status);
         });
 
       // Subscribe to typing indicators
@@ -387,9 +429,9 @@ export default function ChatScreen({ route, navigation }) {
         )
         .subscribe();
 
-      // Start polling as backup for real-time updates
-      console.log('Starting message polling every 2 seconds...');
-      pollingIntervalRef.current = setInterval(pollForNewMessages, 2000);
+      // Start backup polling for reliability (reduced frequency)
+      console.log('Starting backup message polling every 5 seconds...');
+      pollingIntervalRef.current = setInterval(pollForNewMessages, 5000);
 
       // Store subscriptions for cleanup
       const cleanup = () => {
@@ -429,20 +471,17 @@ export default function ChatScreen({ route, navigation }) {
     await removeTypingIndicator(matchId);
 
     try {
+      console.log('🚀 Sending message:', messageContent);
       const sentMessage = await sendMessage(matchId, messageContent);
-      console.log('Message sent successfully:', sentMessage);
+      console.log('✅ Message sent successfully:', sentMessage);
 
-      // Update the last message ID for polling
-      if (sentMessage && sentMessage.id) {
-        lastMessageIdRef.current = sentMessage.id;
-      }
-
-      // Don't add to local state immediately - let real-time subscription or polling handle it
-      // This prevents duplicate messages and ensures proper real-time updates
+      // Real-time subscription should handle showing the message automatically
+      // No need to manually add to state or poll immediately
 
       // Hide quick replies after sending
       setShowQuickReplies(false);
     } catch (error) {
+      console.error('❌ Send message error:', error);
       Alert.alert('Send Error', error.message);
       setInputText(messageContent); // Restore the message
     }
@@ -473,14 +512,13 @@ export default function ChatScreen({ route, navigation }) {
   // Send quick reply
   const sendQuickReply = async (replyText) => {
     try {
-      const sentMessage = await sendMessage(matchId, replyText);
-      setMessages(prev => [...prev, sentMessage]);
+      console.log('🚀 Sending quick reply:', replyText);
+      await sendMessage(matchId, replyText);
       setShowQuickReplies(false);
 
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+      // Real-time subscription will handle showing the message
     } catch (error) {
+      console.error('❌ Quick reply error:', error);
       Alert.alert('Send Error', error.message);
     }
   };
@@ -513,13 +551,32 @@ export default function ChatScreen({ route, navigation }) {
     };
   }, [initializeChat]);
 
+  // Auto-scroll to bottom when messages change or chat loads
   useEffect(() => {
     if (messages.length > 0) {
+      // Use multiple timeouts to ensure scrolling works reliably
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: false });
+      }, 50);
+
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+      }, 200);
     }
   }, [messages.length]);
+
+  // Also scroll to bottom when loading is finished
+  useEffect(() => {
+    if (!loading && messages.length > 0) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: false });
+      }, 100);
+
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 300);
+    }
+  }, [loading, messages.length]);
 
   const renderMessage = ({ item }) => (
     <MessageBubble
@@ -682,8 +739,12 @@ export default function ChatScreen({ route, navigation }) {
                 keyboardDismissMode="on-drag"
                 ListEmptyComponent={
                   <View style={styles.emptyState}>
-                    <Text style={styles.emptyStateText}>🍝 Start your food journey together!</Text>
-                    <Text style={styles.emptyStateSubtext}>Send a message to break the ice 🧊</Text>
+                    <Text style={styles.emptyStateText}>
+                      {messages.length === 0 ? '🍝 Start your food journey together!' : `💬 ${messages.length} messages`}
+                    </Text>
+                    <Text style={styles.emptyStateSubtext}>
+                      {messages.length === 0 ? 'Send a message to break the ice 🧊' : 'Keep the conversation going!'}
+                    </Text>
                   </View>
                 }
               />

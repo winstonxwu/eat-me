@@ -7,6 +7,8 @@ import ProfileDetailsScreen from '../screens/ProfileDetailsScreen';
 import LocationScreen from '../screens/LocationScreen';
 import SuggestionsScreen from '../screens/SuggestionsScreen';
 import ChatScreen from '../screens/ChatScreen';
+import FoodDateScreen from '../screens/FoodDateScreen_Simple';
+import FoodDateProposalsScreen from '../screens/FoodDateProposalsScreen';
 import MainTabs from './MainTabs';
 
 const Stack = createNativeStackNavigator();
@@ -28,6 +30,8 @@ export default function RootNav() {
         <Stack.Screen name="MainTabs" component={MainTabs} />
         <Stack.Screen name="SuggestionsScreen" component={SuggestionsScreen} />
         <Stack.Screen name="ChatScreen" component={ChatScreen} />
+        <Stack.Screen name="FoodDateScreen" component={FoodDateScreen} />
+        <Stack.Screen name="FoodDateProposalsScreen" component={FoodDateProposalsScreen} />
 
       </Stack.Navigator>
     </NavigationContainer>

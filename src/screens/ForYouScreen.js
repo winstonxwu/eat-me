@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, Alert, TouchableOpacity, StyleSheet, Dimensions, Animated, PanResponder, Image } from 'react-native';
 import { likeUser } from '../lib/api';
 import { supabase } from '../utils/supabase';
+import { getImagePublicUrl } from '../utils/imageUpload';
 
 const { width, height } = Dimensions.get('window');
 
@@ -93,31 +94,100 @@ export default function ForYouScreen({ navigation }) {
       // Try RPC function first, fallback to direct queries
       let near, myLikesArr;
 
+      // Get existing matches first to exclude them from all queries
+      const { data: existingMatches } = await supabase
+        .from('matches')
+        .select('user_a, user_b')
+        .or(`user_a.eq.${user.id},user_b.eq.${user.id}`);
+
+      // Collect all user IDs that current user has already matched with
+      const alreadyMatchedIds = new Set([user.id]); // Always exclude self
+      for (const match of existingMatches || []) {
+        if (match.user_a === user.id) {
+          alreadyMatchedIds.add(match.user_b);
+        } else {
+          alreadyMatchedIds.add(match.user_a);
+        }
+      }
+
+      console.log('Already matched with user IDs:', Array.from(alreadyMatchedIds));
+
       // Get potential matches by zipcode
       try {
         const { data, error } = await supabase.rpc('zipcode_matches_with_likes', { p_limit: 20, p_zipcode_range: 2 });
         if (error) throw error;
-        near = data;
+
+        // Filter out already matched users from RPC results
+        near = (data || []).filter(user => !alreadyMatchedIds.has(user.target_user_id));
+        console.log(`Filtered RPC results: ${data?.length || 0} -> ${near.length} (excluded ${(data?.length || 0) - near.length} matched users)`);
 
         // Enrich RPC data with profile photos
         if (near && near.length > 0) {
           const userIds = near.map(u => u.target_user_id).filter(Boolean);
+          console.log('🔍 RPC - Fetching profile photos for user IDs:', userIds);
+
           if (userIds.length > 0) {
-            const { data: profiles } = await supabase
+            const { data: profiles, error: profilesError } = await supabase
               .from('profiles')
               .select('user_id, profile_photo')
               .in('user_id', userIds);
 
+            console.log('📊 RPC - Profile photos query result:', {
+              profiles,
+              error: profilesError,
+              count: profiles?.length || 0
+            });
+
             const photoMap = {};
             for (const profile of profiles || []) {
               photoMap[profile.user_id] = profile.profile_photo;
+              console.log(`👤 RPC - Profile photo for ${profile.user_id}:`, {
+                profile_photo: profile.profile_photo,
+                type: typeof profile.profile_photo,
+                length: profile.profile_photo?.length || 0
+              });
             }
 
-            // Add profile photos to the user data
-            near = near.map(user => ({
-              ...user,
-              profile_photo: photoMap[user.target_user_id] || null
-            }));
+            // Add profile photos to the user data with public URLs
+            near = near.map(user => {
+              const photoKey = photoMap[user.target_user_id];
+              let photoUrl = null;
+
+              console.log(`Processing photo for ${user.name}, photoKey:`, photoKey);
+
+              if (photoKey) {
+                try {
+                  // First try the utility function
+                  photoUrl = getImagePublicUrl(photoKey);
+                  console.log(`✅ Generated URL for ${user.name}:`, photoUrl);
+                } catch (error) {
+                  console.log(`❌ Failed to generate URL for ${user.name}:`, error.message);
+
+                  // Try direct Supabase approach as fallback
+                  try {
+                    const { data } = supabase.storage.from('profiles').getPublicUrl(photoKey);
+                    photoUrl = data?.publicUrl;
+                    console.log(`🔧 Direct Supabase URL for ${user.name}:`, photoUrl);
+                  } catch (directError) {
+                    console.log(`❌ Direct approach also failed for ${user.name}:`, directError.message);
+
+                    // Last resort: if photoKey looks like a full URL already, use it directly
+                    if (photoKey && (photoKey.startsWith('http://') || photoKey.startsWith('https://'))) {
+                      photoUrl = photoKey;
+                      console.log(`🌐 Using photoKey as direct URL for ${user.name}:`, photoUrl);
+                    }
+                  }
+                }
+              } else {
+                console.log(`📷 No photo key for ${user.name}`);
+              }
+
+              return {
+                ...user,
+                profile_photo: photoUrl, // Only use actual user photos
+                profile_photo_key: photoKey
+              };
+            });
           }
         }
       } catch (rpcError) {
@@ -130,7 +200,7 @@ export default function ForYouScreen({ navigation }) {
         const { data: users, error: usersError } = await supabase
           .from('users_public')
           .select('user_id, name, zipcode')
-          .neq('user_id', user.id) // Exclude current user
+          .not('user_id', 'in', `(${Array.from(alreadyMatchedIds).join(',')})`) // Exclude matched users
           .gte('zipcode', zipcodeMin)
           .lte('zipcode', zipcodeMax)
           .limit(20);
@@ -144,14 +214,14 @@ export default function ForYouScreen({ navigation }) {
           const userIds = users.map(u => u.user_id);
           let userLikes = {};
 
-          console.log('Fetching profiles for user IDs:', userIds);
+          console.log('🔍 Fallback - Fetching profiles for user IDs:', userIds);
 
           const { data: profiles, error: profilesError } = await supabase
             .from('profiles')
             .select('user_id, likes, profile_photo')
             .in('user_id', userIds);
 
-          console.log('Profiles query result:', { profiles, profilesError });
+          console.log('📊 Fallback - Profiles query result:', { profiles, profilesError, count: profiles?.length || 0 });
 
           for (const profile of profiles || []) {
             // Ensure likes is an array
@@ -160,7 +230,12 @@ export default function ForYouScreen({ navigation }) {
               likes: profileLikes,
               profile_photo: profile.profile_photo
             };
-            console.log(`User ${profile.user_id} likes:`, profileLikes);
+            console.log(`👤 Fallback - Profile data for ${profile.user_id}:`, {
+              likes: profileLikes,
+              profile_photo: profile.profile_photo,
+              photo_type: typeof profile.profile_photo,
+              photo_length: profile.profile_photo?.length || 0
+            });
           }
 
           // Format data to match RPC function output
@@ -169,12 +244,45 @@ export default function ForYouScreen({ navigation }) {
             const userPreferences = userProfile.likes || [];
             console.log(`Mapping user ${u.user_id} (${u.name}) with likes:`, userPreferences);
 
+            let photoUrl = null;
+            const photoKey = userProfile.profile_photo;
+
+            console.log(`Fallback - Processing photo for ${u.name}, photoKey:`, photoKey);
+
+            if (photoKey) {
+              try {
+                // First try the utility function
+                photoUrl = getImagePublicUrl(photoKey);
+                console.log(`✅ Fallback - Generated URL for ${u.name}:`, photoUrl);
+              } catch (error) {
+                console.log(`❌ Fallback - Failed to generate URL for ${u.name}:`, error.message);
+
+                // Try direct Supabase approach as fallback
+                try {
+                  const { data } = supabase.storage.from('profiles').getPublicUrl(photoKey);
+                  photoUrl = data?.publicUrl;
+                  console.log(`🔧 Fallback - Direct Supabase URL for ${u.name}:`, photoUrl);
+                } catch (directError) {
+                  console.log(`❌ Fallback - Direct approach also failed for ${u.name}:`, directError.message);
+
+                  // Last resort: if photoKey looks like a full URL already, use it directly
+                  if (photoKey && (photoKey.startsWith('http://') || photoKey.startsWith('https://'))) {
+                    photoUrl = photoKey;
+                    console.log(`🌐 Fallback - Using photoKey as direct URL for ${u.name}:`, photoUrl);
+                  }
+                }
+              }
+            } else {
+              console.log(`📷 Fallback - No photo key for ${u.name}`);
+            }
+
             return {
               target_user_id: u.user_id,
               name: u.name,
               zipcode: u.zipcode,
               likes: userPreferences,
-              profile_photo: userProfile.profile_photo,
+              profile_photo: photoUrl, // Only use actual user photos
+              profile_photo_key: userProfile.profile_photo,
               zipcode_diff: Math.abs(u.zipcode - zipcode)
             };
           });
@@ -216,6 +324,11 @@ export default function ForYouScreen({ navigation }) {
       const enriched = rows.map(r => {
         const otherUserLikes = normalizeTags(r.likes || []);
         const { score, inter } = jaccard(myLikes, otherUserLikes);
+        console.log(`User ${r.name} profile data:`, {
+          profile_photo: r.profile_photo,
+          profile_photo_key: r.profile_photo_key,
+          hasPhoto: !!r.profile_photo
+        }); // Debug log
         return { ...r, score, commonLikes: inter };
       }).sort((a,b)=> (b.score-a.score) || ((a.zipcode_diff||1e9)-(b.zipcode_diff||1e9)));
 
@@ -523,17 +636,32 @@ export default function ForYouScreen({ navigation }) {
             ]}
           >
             <View style={styles.cardContent}>
-              {item.profile_photo && (
-                <View style={styles.photoContainer}>
-                  <Image source={{ uri: item.profile_photo }} style={styles.profilePhoto} />
-                </View>
-              )}
               <Text style={styles.userName}>
                 {item.name || 'User'}
               </Text>
               <Text style={styles.similarity}>
                 {percent}% match
               </Text>
+              <View style={styles.photoContainer}>
+                {item.profile_photo ? (
+                  <Image
+                    source={{ uri: item.profile_photo }}
+                    style={styles.profilePhoto}
+                    onError={(error) => {
+                      console.log('❌ Profile image failed to load for user:', item.name);
+                      console.log('Failed URL:', item.profile_photo);
+                      console.log('Original key:', item.profile_photo_key);
+                    }}
+                    onLoad={() => {
+                      console.log('✅ Profile image loaded successfully for user:', item.name);
+                    }}
+                  />
+                ) : (
+                  <View style={styles.placeholderPhoto}>
+                    <Text style={styles.placeholderText}>📷</Text>
+                  </View>
+                )}
+              </View>
               <View style={styles.tapHint}>
                 <Text style={styles.tapHintText}>👆 Tap to see food preferences</Text>
               </View>
@@ -885,14 +1013,29 @@ const styles = StyleSheet.create({
   },
   photoContainer: {
     alignItems: 'center',
+    marginTop: 20,
     marginBottom: 20,
   },
   profilePhoto: {
     width: 120,
     height: 120,
-    borderRadius: 60,
+    borderRadius: 12, // Square with rounded corners
     borderWidth: 3,
     borderColor: '#ffb6c1',
+  },
+  placeholderPhoto: {
+    width: 120,
+    height: 120,
+    borderRadius: 12, // Square with rounded corners
+    borderWidth: 3,
+    borderColor: '#ddd',
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  placeholderText: {
+    fontSize: 40,
+    opacity: 0.6,
   },
   userName: {
     fontSize: 32,

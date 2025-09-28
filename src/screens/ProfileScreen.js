@@ -1,115 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, Alert, Image, Dimensions,
+  ScrollView, Alert, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../utils/supabase';
-import { uploadImageToSupabase } from '../utils/imageUpload';
+import { uploadImageToSupabase, getImagePublicUrl, deleteImageFromSupabase } from '../utils/imageUpload';
 
-const { width } = Dimensions.get('window');
-
-const FOOD_CATEGORIES = [
-  { id: 'italian', name: 'Italian', emoji: '🍝' },
-  { id: 'japanese', name: 'Japanese', emoji: '🍣' },
-  { id: 'mexican', name: 'Mexican', emoji: '🌮' },
-  { id: 'chinese', name: 'Chinese', emoji: '🥟' },
-  { id: 'indian', name: 'Indian', emoji: '🍛' },
-  { id: 'american', name: 'American', emoji: '🍔' },
-  { id: 'thai', name: 'Thai', emoji: '🍜' },
-  { id: 'french', name: 'French', emoji: '🥐' },
-  { id: 'korean', name: 'Korean', emoji: '🍲' },
-  { id: 'mediterranean', name: 'Mediterranean', emoji: '🥗' },
-  { id: 'seafood', name: 'Seafood', emoji: '🦐' },
-  { id: 'vegetarian', name: 'Vegetarian', emoji: '🥕' },
-  { id: 'desserts', name: 'Desserts', emoji: '🍰' },
-  { id: 'pizza', name: 'Pizza', emoji: '🍕' },
-  { id: 'bbq', name: 'BBQ', emoji: '🍖' },
-  { id: 'breakfast', name: 'Breakfast', emoji: '🥞' },
-];
-
-const VALID_PREFS = new Set(FOOD_CATEGORIES.map(c => c.id));
-const norm = (arr) => Array.isArray(arr) ? arr.map(t => String(t).trim().toLowerCase()).filter(Boolean) : [];
-
-const TAG_TO_CATEGORY = {
-  ramen: 'japanese',
-  sushi: 'japanese',
-  udon: 'japanese',
-  soba: 'japanese',
-  tempura: 'japanese',
-  pizza: 'pizza',
-  pasta: 'italian',
-  lasagna: 'italian',
-  taco: 'mexican',
-  burrito: 'mexican',
-  quesadilla: 'mexican',
-  dimsum: 'chinese',
-  dumpling: 'chinese',
-  curry: 'indian',
-  kebab: 'mediterranean',
-  shawarma: 'mediterranean',
-  burger: 'american',
-  hamburger: 'american',
-  bbq: 'bbq',
-  brisket: 'bbq',
-  kimchi: 'korean',
-  bulgogi: 'korean',
-  bibimbap: 'korean',
-  pho: 'thai',
-  padthai: 'thai',
-  croissant: 'french',
-  macaron: 'french',
-  seafood: 'seafood',
-  vegetarian: 'vegetarian',
-  salad: 'mediterranean',
-  dessert: 'desserts',
-  cake: 'desserts',
-  pancake: 'breakfast',
-  waffle: 'breakfast',
-};
-
-function inferCategoriesFromLikes(rawLikes) {
-  const cats = new Set();
-  for (const t of norm(rawLikes)) {
-    if (VALID_PREFS.has(t)) { cats.add(t); continue; }
-    const mapped = TAG_TO_CATEGORY[t];
-    if (mapped && VALID_PREFS.has(mapped)) cats.add(mapped);
-  }
-  return Array.from(cats);
-}
-
-function stripBust(u) {
-  if (!u) return u;
-  const i = u.indexOf('?');
-  return i >= 0 ? u.slice(0, i) : u;
-}
-
-function withBustOnce(u) {
-  const raw = stripBust(u);
-  return `${raw}?v=${Date.now()}`;
-}
 
 export default function ProfileScreen({ navigation }) {
   const [user, setUser] = useState(null);
   const [name, setName] = useState('');
   const [bio, setBio] = useState('');
-  const [profileImage, setProfileImage] = useState(null);
-  const [photoMime, setPhotoMime] = useState(null);
-  const [photoName, setPhotoName] = useState(null);
-  const [selectedPreferences, setSelectedPreferences] = useState([]);
-  const [rawLikes, setRawLikes] = useState([]);
+  const [profileImageUrl, setProfileImageUrl] = useState(null); // Display URL
+  const [profileStorageKey, setProfileStorageKey] = useState(null); // Storage key
+  const [pendingImageUri, setPendingImageUri] = useState(null); // Local URI waiting to be uploaded
+  const [imageLoadFailed, setImageLoadFailed] = useState(false); // Track if current image failed to load
   const [loading, setLoading] = useState(false);
 
   useEffect(() => { loadProfile(); }, []);
-
-  const toPublicUrl = async (maybePath) => {
-    if (!maybePath) return null;
-    if (/^https?:\/\//i.test(maybePath)) return withBustOnce(maybePath);
-    const { data } = supabase.storage.from('profiles').getPublicUrl(maybePath);
-    return data?.publicUrl ? withBustOnce(data.publicUrl) : null;
-  };
 
   const loadProfile = async () => {
     try {
@@ -117,113 +28,214 @@ export default function ProfileScreen({ navigation }) {
       if (!currentUser) return;
       setUser(currentUser);
 
-      const { data: publicProfile } = await supabase
-        .from('users_public').select('name')
-        .eq('user_id', currentUser.id).maybeSingle();
+      console.log('Loading profile for user:', currentUser.id);
 
+      // Load user's public info (name)
+      const { data: publicProfile } = await supabase
+        .from('users_public')
+        .select('name')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+
+      // Load user's profile info (bio, profile_photo)
       const { data: profile } = await supabase
-        .from('profiles').select('bio, profile_photo, likes')
-        .eq('user_id', currentUser.id).maybeSingle();
+        .from('profiles')
+        .select('bio, profile_photo')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+
+      console.log('Profile data loaded:', { publicProfile, profile });
 
       if (publicProfile?.name) setName(publicProfile.name);
       if (profile?.bio) setBio(profile.bio);
 
-      const dbLikes = Array.isArray(profile?.likes) ? profile.likes : [];
-      setRawLikes(dbLikes);
-      setSelectedPreferences(inferCategoriesFromLikes(dbLikes));
-
+      // Handle profile photo - now expecting a storage key, not a URL
       if (profile?.profile_photo) {
-        const url = await toPublicUrl(profile.profile_photo);
-        setProfileImage(url || null);
+        console.log('Profile photo found:', profile.profile_photo);
+
+        // Check if it's already a storage key or an old-style URL that needs fixing
+        if (profile.profile_photo.startsWith('http')) {
+          // Old-style URL - clear it so user can re-upload
+          console.log('Found old-style URL, clearing it');
+          setProfileImageUrl(null);
+          setProfileStorageKey(null);
+        } else {
+          // It's a storage key - generate the public URL
+          setProfileStorageKey(profile.profile_photo);
+          const publicUrl = getImagePublicUrl(profile.profile_photo);
+          setProfileImageUrl(publicUrl);
+          console.log('Generated public URL:', publicUrl);
+        }
       } else {
-        setProfileImage(null);
+        setProfileImageUrl(null);
+        setProfileStorageKey(null);
       }
+
+      // Clear any pending upload
+      setPendingImageUri(null);
+
     } catch (e) {
+      console.error('Profile load error:', e);
       Alert.alert('Load error', e.message || String(e));
     }
   };
 
   const pickImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') { Alert.alert('Permission needed', 'We need camera roll permissions to select your photo!'); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaType.Image,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.9,
-    });
-    if (!result.canceled && result.assets[0]) {
-      setProfileImage(result.assets[0].uri);
-      setPhotoMime(result.assets[0].mimeType || null);
-      setPhotoName(result.assets[0].fileName || null);
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'We need camera roll permissions to select your photo!');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.9,
+      });
+
+      console.log('Gallery picker result:', result);
+
+      if (!result.canceled && result.assets[0]) {
+        const selectedUri = result.assets[0].uri;
+        console.log('Gallery image selected:', selectedUri);
+
+        // Set the local URI for pending upload
+        setPendingImageUri(selectedUri);
+
+        // For immediate display, keep the local URI but clear the remote URL
+        setProfileImageUrl(selectedUri);
+        // Clear the storage key since we have a new image
+        setProfileStorageKey(null);
+        // Reset image load failure state
+        setImageLoadFailed(false);
+      }
+    } catch (error) {
+      console.error('Gallery picker error:', error);
+      Alert.alert('Error', 'Failed to pick image from gallery');
     }
   };
 
   const takePhoto = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') { Alert.alert('Permission needed', 'We need camera permissions to take your photo!'); return; }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaType.Image,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.9,
-    });
-    if (!result.canceled && result.assets[0]) {
-      setProfileImage(result.assets[0].uri);
-      setPhotoMime(result.assets[0].mimeType || null);
-      setPhotoName(result.assets[0].fileName || null);
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'We need camera permissions to take your photo!');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.9,
+      });
+
+      console.log('Camera result:', result);
+
+      if (!result.canceled && result.assets[0]) {
+        const takenUri = result.assets[0].uri;
+        console.log('Camera image taken:', takenUri);
+
+        // Set the local URI for pending upload
+        setPendingImageUri(takenUri);
+
+        // For immediate display, keep the local URI but clear the remote URL
+        setProfileImageUrl(takenUri);
+        // Clear the storage key since we have a new image
+        setProfileStorageKey(null);
+        // Reset image load failure state
+        setImageLoadFailed(false);
+      }
+    } catch (error) {
+      console.error('Camera error:', error);
+      Alert.alert('Error', 'Failed to take photo');
     }
   };
 
-  const togglePreference = (id) => {
-    const key = String(id).toLowerCase();
-    if (!VALID_PREFS.has(key)) return;
-    setSelectedPreferences(prev => (prev.includes(key) ? prev.filter(x => x !== key) : [...prev, key]));
-  };
-
   const saveProfile = async () => {
-    if (!user) { Alert.alert('Error', 'Please sign in first'); return; }
-    if (!name.trim()) { Alert.alert('Error', 'Please enter your name'); return; }
+    if (!user) {
+      Alert.alert('Error', 'Please sign in first');
+      return;
+    }
+    if (!name.trim()) {
+      Alert.alert('Error', 'Please enter your name');
+      return;
+    }
 
     setLoading(true);
     try {
+      console.log('Starting profile save...');
+
+      // Save user's public info (name)
       const { error: publicError } = await supabase
         .from('users_public')
         .upsert({ user_id: user.id, name: name.trim() }, { onConflict: 'user_id' })
         .select().single();
+
       if (publicError) throw publicError;
 
-      let photoUrl = null;
-      if (profileImage) {
-        if (profileImage.startsWith('file://') || profileImage.startsWith('content://')) {
-          const uploaded = await uploadImageToSupabase(profileImage, user.id);
-          const uploadedUrl = typeof uploaded === 'string' ? uploaded : uploaded?.publicUrl || null;
-          if (uploadedUrl) {
-            setProfileImage(withBustOnce(uploadedUrl));
-            photoUrl = stripBust(uploadedUrl);
+      // Handle image upload if there's a new image
+      let newStorageKey = profileStorageKey; // Keep existing key by default
+
+      if (pendingImageUri) {
+        console.log('Uploading new image:', pendingImageUri);
+
+        try {
+          // Delete old image if it exists
+          if (profileStorageKey) {
+            console.log('Deleting old image:', profileStorageKey);
+            await deleteImageFromSupabase(profileStorageKey);
           }
-        } else {
-          photoUrl = stripBust(profileImage);
+
+          // Upload new image
+          const uploadResult = await uploadImageToSupabase(pendingImageUri, user.id);
+          console.log('Upload successful:', uploadResult);
+
+          // Use the storage key (not the URL) for database storage
+          newStorageKey = uploadResult.storageKey;
+
+          // Update display URL with the new URL
+          setProfileImageUrl(uploadResult.publicUrl);
+          setProfileStorageKey(newStorageKey);
+
+          // Clear pending upload
+          setPendingImageUri(null);
+
+        } catch (uploadError) {
+          console.error('Image upload failed:', uploadError);
+          Alert.alert('Upload Error', `Failed to upload image: ${uploadError.message}`);
+          setLoading(false);
+          return;
         }
       }
 
-      const existing = new Set(norm(rawLikes));
-      for (const v of Array.from(existing)) { if (VALID_PREFS.has(v)) existing.delete(v); }
-      for (const cat of selectedPreferences) { if (VALID_PREFS.has(cat)) existing.add(cat); }
-      const newLikes = Array.from(existing);
+      // Save profile data (bio and profile_photo storage key)
+      const profilePayload = {
+        user_id: user.id,
+        bio: bio.trim(),
+      };
 
-      const baseProfile = { user_id: user.id, bio: bio.trim(), likes: newLikes };
-      const payload = photoUrl ? { ...baseProfile, profile_photo: photoUrl } : baseProfile;
+      // Only include profile_photo if we have a storage key
+      if (newStorageKey) {
+        profilePayload.profile_photo = newStorageKey;
+      }
+
+      console.log('Saving profile payload:', profilePayload);
 
       const { error: profileError } = await supabase
         .from('profiles')
-        .upsert(payload, { onConflict: 'user_id' })
+        .upsert(profilePayload, { onConflict: 'user_id' })
         .select().single();
+
       if (profileError) throw profileError;
 
-      await loadProfile();
+      console.log('Profile saved successfully');
       Alert.alert('Success', 'Profile updated successfully!');
+
     } catch (e) {
+      console.error('Save profile error:', e);
       Alert.alert('Error', e.message || 'Failed to save profile');
     } finally {
       setLoading(false);
@@ -233,21 +245,6 @@ export default function ProfileScreen({ navigation }) {
   const signOut = async () => {
     try { await supabase.auth.signOut(); navigation.replace('Login'); }
     catch { Alert.alert('Error', 'Failed to sign out'); }
-  };
-
-  const renderCategory = (category) => {
-    const isSelected = selectedPreferences.includes(category.id);
-    return (
-      <TouchableOpacity
-        key={category.id}
-        style={[styles.categoryCard, isSelected && styles.selectedCard]}
-        onPress={() => togglePreference(category.id)}
-        activeOpacity={0.8}
-      >
-        <Text style={styles.emoji}>{category.emoji}</Text>
-        <Text style={[styles.categoryName, isSelected && styles.selectedText]}>{category.name}</Text>
-      </TouchableOpacity>
-    );
   };
 
   return (
@@ -260,13 +257,31 @@ export default function ProfileScreen({ navigation }) {
 
         <View style={styles.photoSection}>
           <TouchableOpacity style={styles.photoContainer} onPress={pickImage}>
-            {profileImage ? (
+            {profileImageUrl && !imageLoadFailed ? (
               <Image
-                source={{ uri: profileImage }}
+                source={{
+                  uri: profileImageUrl,
+                  cache: 'reload' // Force reload to avoid cache issues
+                }}
                 style={styles.profilePhoto}
                 resizeMode="cover"
-                onLoad={() => console.log('IMAGE loaded:', profileImage)}
-                onError={(e) => console.log('IMAGE error:', profileImage, e.nativeEvent)}
+                onLoad={() => console.log('✅ Image loaded successfully:', profileImageUrl.substring(0, 50) + '...')}
+                onLoadStart={() => console.log('🔄 Image loading started:', profileImageUrl.substring(0, 50) + '...')}
+                onError={(error) => {
+                  console.error('❌ Image load error:', error);
+                  console.error('Failed URI:', profileImageUrl);
+                  console.error('Error details:', error?.nativeEvent);
+
+                  // Mark image as failed to load
+                  setImageLoadFailed(true);
+
+                  // Only show alert for remote URLs (not local file:// URIs during preview)
+                  if (!profileImageUrl.startsWith('file://') && !profileImageUrl.startsWith('content://')) {
+                    console.log('Remote image failed to load');
+                  } else {
+                    console.log('Local image load failed, this is normal on some devices');
+                  }
+                }}
               />
             ) : (
               <View style={styles.placeholderPhoto}>
@@ -317,14 +332,6 @@ export default function ProfileScreen({ navigation }) {
           <Text style={styles.charCount}>{bio.length}/200</Text>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Food Preferences</Text>
-          <Text style={styles.sectionSubtitle}>
-            Select your favorite food categories ({selectedPreferences.length} selected)
-          </Text>
-          <View style={styles.categoriesContainer}>{FOOD_CATEGORIES.map(renderCategory)}</View>
-        </View>
-
         <View style={styles.buttonContainer}>
           <TouchableOpacity
             style={[styles.saveButton, loading && styles.disabledButton]}
@@ -359,16 +366,9 @@ const styles = StyleSheet.create({
   photoButtonText: { color: '#ffb6c1', fontSize: 14, fontWeight: '600' },
   section: { marginBottom: 25, paddingHorizontal: 20 },
   sectionTitle: { fontSize: 20, fontWeight: 'bold', color: 'white', marginBottom: 10 },
-  sectionSubtitle: { fontSize: 14, color: 'rgba(255,255,255,0.8)', marginBottom: 15 },
   input: { backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 15, paddingHorizontal: 15, paddingVertical: 12, fontSize: 16, color: 'white', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
   bioInput: { height: 80, textAlignVertical: 'top' },
   charCount: { textAlign: 'right', color: 'rgba(255,255,255,0.6)', fontSize: 12 },
-  categoriesContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  categoryCard: { width: (width - 60) / 2, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 15, padding: 15, marginBottom: 10, alignItems: 'center', borderWidth: 2, borderColor: 'transparent' },
-  selectedCard: { backgroundColor: 'rgba(255,255,255,0.2)', borderColor: 'white' },
-  emoji: { fontSize: 24, marginBottom: 5 },
-  categoryName: { fontSize: 12, color: 'rgba(255,255,255,0.8)', textAlign: 'center', fontWeight: '500' },
-  selectedText: { color: 'white', fontWeight: 'bold' },
   buttonContainer: { paddingHorizontal: 20, paddingBottom: 30, gap: 15 },
   saveButton: { backgroundColor: 'white', borderRadius: 25, paddingVertical: 15, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84 },
   disabledButton: { opacity: 0.5 },

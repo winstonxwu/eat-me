@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { scheduleChatNotification } from './notifications';
 
 // Message types
 export const MESSAGE_TYPES = {
@@ -51,7 +52,7 @@ export async function sendMessage(matchId, content, messageType = MESSAGE_TYPES.
       sender_id: user.id,
       message_type: messageType,
       metadata: metadata,
-      created_at: new Date().toISOString(),
+      // Let Supabase set created_at automatically with proper timezone handling
     };
 
     // Try with content column first, then fall back to encrypted_content
@@ -408,5 +409,97 @@ export async function searchMessages(matchId, query, limit = 20) {
   } catch (error) {
     console.error('Search messages error:', error);
     return [];
+  }
+}
+
+// Set up real-time message notifications for the current user
+export function setupMessageNotifications() {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (error) {
+        reject(new Error(`Auth error: ${error.message}`));
+        return;
+      }
+      if (!user) {
+        reject(new Error('User not authenticated'));
+        return;
+      }
+
+      console.log('Setting up message notifications for user:', user.id);
+
+      // Subscribe to messages table changes
+      const subscription = supabase
+        .channel('messages')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'messages'
+          },
+          async (payload) => {
+            console.log('New message received:', payload);
+
+            const newMessage = payload.new;
+
+            // Only show notification if the current user is NOT the sender
+            if (newMessage.sender_id !== user.id) {
+              try {
+                // Get match data to verify this user is part of the conversation
+                const { data: matchData } = await supabase
+                  .from('matches')
+                  .select('user_a, user_b')
+                  .eq('id', newMessage.match_id)
+                  .single();
+
+                // Check if current user is part of this match
+                if (matchData && (matchData.user_a === user.id || matchData.user_b === user.id)) {
+                  // Get sender's name
+                  const { data: senderData } = await supabase
+                    .from('users_public')
+                    .select('name')
+                    .eq('user_id', newMessage.sender_id)
+                    .single();
+
+                  if (senderData?.name) {
+                    console.log('📱 Scheduling notification for message from:', senderData.name, 'to user:', user.id);
+
+                    // Only send notification if user is not currently in the chat
+                    // This prevents notifications when actively chatting
+                    scheduleChatNotification({
+                      senderName: senderData.name,
+                      message: newMessage.content || newMessage.encrypted_content || 'New message',
+                      matchId: newMessage.match_id
+                    });
+                  } else {
+                    console.log('❌ Could not get sender name for notification');
+                  }
+                } else {
+                  console.log('❌ User not part of this match, skipping notification');
+                }
+              } catch (error) {
+                console.error('Error processing message notification:', error);
+              }
+            } else {
+              console.log('⚠️ Skipping notification - user sent this message');
+            }
+          }
+        )
+        .subscribe();
+
+      resolve(subscription);
+    } catch (error) {
+      console.error('Error setting up message notifications:', error);
+      reject(error);
+    }
+  });
+}
+
+// Clean up message notification subscription
+export function cleanupMessageNotifications(subscription) {
+  if (subscription) {
+    supabase.removeChannel(subscription);
+    console.log('Message notifications cleaned up');
   }
 }
