@@ -376,16 +376,32 @@ export async function getPersonalizedStarters(matchId) {
     // Generate personalized starters based on shared preferences
     const personalizedStarters = sharedLikes.map(preference => {
       const starters = {
-        italian: "What's your go-to Italian dish? 🍝",
-        japanese: "Sushi or ramen? The eternal debate! 🍣🍜",
-        mexican: "Spice level: mild or make-me-cry hot? 🌮🔥",
-        chinese: "Dumplings vs noodles - which team are you on? 🥟",
-        indian: "Favorite curry? I need recommendations! 🍛",
-        thai: "Tom yum or pad thai? 🍜",
-        korean: "Korean BBQ date sounds amazing, right? 🍖",
+        sushi: "Sushi or ramen? The eternal debate! 🍣🍜",
+        ramen: "What's your go-to ramen style? 🍜",
+        udon: "Thick noodles or thin - what's your preference? 🍲",
+        tempura: "Tempura shrimp or vegetables? 🍤",
+        dumplings: "Dumplings vs noodles - which team are you on? 🥟",
+        mapo_tofu: "Spice level: mild or make-me-cry hot? 🌶️",
+        peking_duck: "Classic Chinese dishes are the best! 🦆",
+        hotpot: "Hotpot date sounds perfect! 🍲",
+        kimchi: "How do you like your kimchi - mild or extra spicy? 🥬",
+        bibimbap: "Mixed rice bowls are so satisfying! 🍲",
+        tteokbokki: "Korean street food is amazing! 🍢",
+        pho: "Pho real, Vietnamese food is incredible! 🍜",
+        pad_thai: "Pad Thai or Tom Yum? 🍤",
+        curry: "Favorite curry? I need recommendations! 🍛",
+        biryani: "Biryani is pure comfort food! 🍚",
+        tandoori_chicken: "Tandoori flavors are unmatched! 🍗",
         pizza: "Pineapple on pizza - yes or absolutely not? 🍕",
+        pasta: "What's your go-to pasta dish? 🍝",
+        burger: "Best burger toppings? Let's debate! 🍔",
+        tacos: "Taco Tuesday every day? 🌮",
+        coffee: "Coffee date? ☕",
+        tea: "Tea person too! What's your favorite blend? 🍵",
+        icecream: "Favorite ice cream flavor? 🍦",
+        cake: "Life's too short for bad cake! 🍰"
       };
-      return starters[preference] || `Love ${preference} food too! What's your favorite dish? 😋`;
+      return starters[preference] || `Love ${preference} too! What's your favorite dish? 😋`;
     });
 
     return [...personalizedStarters.slice(0, 3), ...CONVERSATION_STARTERS];

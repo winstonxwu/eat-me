@@ -6,24 +6,82 @@ import { useIsFocused } from '@react-navigation/native';
 import MapView, { Marker } from 'react-native-maps';
 
 const CUISINE_MAP = {
-  japanese: ['japanese','sushi','ramen','udon','izakaya'],
-  chinese: ['chinese','noodles','dim_sum','dumpling'],
-  korean: ['korean','korean_bbq'],
-  italian: ['italian','pizza','pasta'],
-  american: ['american','burger','steakhouse','fried_chicken'],
-  mexican: ['mexican','taco','tacos','burrito'],
-  thai: ['thai'],
-  indian: ['indian','curry'],
-  mediterranean: ['mediterranean','greek','turkish','lebanese'],
-  french: ['french','bistro'],
-  bbq: ['bbq','barbecue'],
-  seafood: ['seafood'],
-  vegetarian: ['vegetarian','veggie'],
-  vegan: ['vegan'],
-  dessert: ['dessert','ice_cream','cake','patisserie'],
-  coffee: ['coffee','cafe'],
-  pizza: ['pizza'],
-  burger: ['burger','burgers'],
+  // Japanese
+  sushi: ['japanese','sushi','izakaya'],
+  ramen: ['japanese','ramen','noodles'],
+  udon: ['japanese','udon','noodles'],
+  tempura: ['japanese','tempura'],
+  okonomiyaki: ['japanese','okonomiyaki'],
+  takoyaki: ['japanese','takoyaki'],
+
+  // Chinese
+  dumplings: ['chinese','dumpling','dim_sum'],
+  mapo_tofu: ['chinese','tofu','szechuan'],
+  peking_duck: ['chinese','duck'],
+  baozi: ['chinese','baozi','dim_sum'],
+  hotpot: ['chinese','hotpot','hot_pot'],
+
+  // Korean
+  kimchi: ['korean','kimchi'],
+  bibimbap: ['korean','bibimbap'],
+  tteokbokki: ['korean','tteokbokki'],
+  samgyeopsal: ['korean','korean_bbq','bbq'],
+
+  // Southeast Asian
+  pho: ['vietnamese','pho','noodles'],
+  banh_mi: ['vietnamese','banh_mi','sandwich'],
+  pad_thai: ['thai','pad_thai','noodles'],
+  satay: ['thai','satay','malaysian'],
+  nasi_goreng: ['indonesian','fried_rice'],
+
+  // South Asian
+  curry: ['indian','curry'],
+  biryani: ['indian','biryani'],
+  tandoori_chicken: ['indian','tandoori','chicken'],
+  samosa: ['indian','samosa'],
+  naan: ['indian','naan','bread'],
+
+  // European
+  pizza: ['italian','pizza'],
+  pasta: ['italian','pasta'],
+  risotto: ['italian','risotto'],
+  paella: ['spanish','paella'],
+  croissant: ['french','croissant','bakery'],
+  baguette: ['french','baguette','bakery'],
+  wurst: ['german','sausage','wurst'],
+
+  // American & Latin
+  burger: ['american','burger','burgers'],
+  hotdog: ['american','hot_dog','hotdog'],
+  fried_chicken: ['american','fried_chicken','chicken'],
+  tacos: ['mexican','taco','tacos'],
+  burrito: ['mexican','burrito'],
+  nachos: ['mexican','nachos','tex_mex'],
+  steak: ['american','steakhouse','steak','meat'],
+
+  // Desserts
+  icecream: ['dessert','ice_cream','gelato'],
+  cake: ['dessert','cake','bakery','patisserie'],
+  donut: ['dessert','donut','doughnut','bakery'],
+  macaron: ['dessert','macaron','patisserie','french'],
+  churros: ['dessert','churros','spanish'],
+  pudding: ['dessert','pudding'],
+  chocolate: ['dessert','chocolate','candy'],
+
+  // Drinks
+  coffee: ['coffee','cafe','espresso'],
+  tea: ['tea','bubble_tea','boba'],
+  beer: ['pub','bar','brewery','beer'],
+  wine: ['wine_bar','winery','wine'],
+  cocktail: ['bar','cocktail','lounge'],
+  boba: ['bubble_tea','boba','tea'],
+
+  // Others
+  sandwich: ['sandwich','deli'],
+  salad: ['salad','healthy','vegetarian'],
+  soup: ['soup','ramen','pho'],
+  fries: ['american','fast_food','fries'],
+  popcorn: ['snack','movie_theater','popcorn'],
 };
 const normalizeLikes = (arr) =>
   Array.isArray(arr) ? arr.map(s => String(s).toLowerCase().trim().replace(/\s+/g,'_')) : [];
@@ -128,13 +186,13 @@ async function getZipsAndSharedLikes(matchId) {
       if (realShared.length > 0) {
         out.shared = realShared;
       } else {
-        out.shared = ['italian', 'sushi'];
+        out.shared = ['pizza', 'sushi'];
       }
     } else {
-      out.shared = ['pizza', 'mexican', 'italian'];
+      out.shared = ['pizza', 'tacos', 'pasta'];
     }
   } catch (error) {
-    out.shared = ['burger', 'italian'];
+    out.shared = ['burger', 'pizza'];
   }
   return out;
 }
